@@ -1,0 +1,51 @@
+// Design Tokens from source-swapper
+:root {
+  // Border Radius
+  --radius-small: 3px;
+  --radius-medium: 6px;
+  --radius-large: 10px;
+
+  // Spacing
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 6px;
+  --space-lg: 10px;
+  --space-xl: 14px;
+  --space-xxl: 18px;
+
+  // Colors
+  --primary-blue: #4aa3ff;
+  --primary-blue-hover: #6bb5ff;
+  --primary-blue-active: #3c8dde;
+  --border-default: #2b2b2b;
+  --border-light: #3a3a3a;
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --bg-app: #1c1c1c;
+  --bg-panel: #212121;
+  --bg-panel-dark: #1a1a1a;
+  --bg-input: #242424;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-button: #2c2c2c;
+  --bg-header: #1f1f1f;
+  --text-primary: #e6e6e6;
+  --text-secondary: #b5b5b5;
+  --text-muted: #8d8d8d;
+  --text-white: #ffffff;
+
+  // Typography
+  --font-size-caption: 10px;
+  --font-size-body: 11px;
+  --font-size-heading: 12px;
+  --font-size-title: 14px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  // Component Heights
+  --height-header: 44px;
+  --height-footer: 34px;
+  --height-button-sm: 26px;
+  --height-button-md: 30px;
+  --height-button-lg: 34px;
+  --height-input: 30px;
+}

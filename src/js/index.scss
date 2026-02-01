@@ -1,0 +1,85 @@
+:root {
+  --radius-small: 3px;
+  --radius-medium: 6px;
+  --radius-large: 10px;
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 6px;
+  --space-lg: 10px;
+  --space-xl: 14px;
+  --space-xxl: 18px;
+  --primary-blue: #4aa3ff;
+  --primary-blue-hover: #6bb5ff;
+  --primary-blue-active: #3c8dde;
+  --border-default: #2b2b2b;
+  --border-light: #3a3a3a;
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --bg-app: #1c1c1c;
+  --bg-panel: #212121;
+  --bg-panel-dark: #1a1a1a;
+  --bg-input: #242424;
+  --bg-hover: rgba(255, 255, 255, 0.07);
+  --bg-button: #2c2c2c;
+  --text-primary: #e6e6e6;
+  --text-secondary: #b5b5b5;
+  --text-muted: #8d8d8d;
+  --text-white: #ffffff;
+  --font-size-caption: 10px;
+  --font-size-body: 11px;
+  --font-size-heading: 12px;
+  --font-size-title: 14px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --height-button-sm: 26px;
+  --height-button-md: 30px;
+  --height-button-lg: 34px;
+  --height-input: 30px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-app);
+  color: var(--text-white);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
+  -webkit-font-smoothing: antialiased;
+  min-width: 320px;
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1d1d1d;
+  border-radius: var(--radius-medium);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #484848;
+  border-radius: var(--radius-medium);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #666666;
+}
