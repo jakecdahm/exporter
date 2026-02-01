@@ -24,20 +24,12 @@ const config: CEP_Config = {
 
   panels: [
     {
-      mainPath: "./main/index.html",
+      mainPath: "./claude/index.html",
       name: "main",
       panelDisplayName: "Exporter",
       autoVisible: true,
-      width: 600,
-      height: 650,
-    },
-    {
-      mainPath: "./claude/index.html",
-      name: "claude",
-      panelDisplayName: "Exporter (Claude)",
-      autoVisible: false,
       width: 320,
-      height: 500,
+      height: 550,
     },
   ],
   build: {
