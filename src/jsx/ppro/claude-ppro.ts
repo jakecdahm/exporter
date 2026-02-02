@@ -1051,8 +1051,18 @@ export const claude_getQueueInfo = (payload: QueueInfoPayload) => {
 
     for (var j = 0; j < sequences.length; j++) {
       var seq = sequences[j];
+      // Get sequence duration (end time)
+      var endTicks = 0;
+      try {
+        if (seq.end && seq.end.ticks) {
+          endTicks = seq.end.ticks;
+        }
+      } catch (e) {}
       items.push({
         sequenceName: seq.name || "Sequence",
+        clipIndex: j,
+        startTicks: 0,
+        endTicks: endTicks,
       });
     }
   }
