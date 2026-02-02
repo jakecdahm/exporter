@@ -279,11 +279,7 @@ const App: React.FC = () => {
           <div className="section-label">Options</div>
           <ExportOptions
             exportType={settings.exportType}
-            filenamePattern={settings.filenamePattern}
-            customFilename={settings.customFilename}
             onExportTypeChange={(value) => updateSettings({ exportType: value })}
-            onFilenamePatternChange={(value) => updateSettings({ filenamePattern: value })}
-            onCustomFilenameChange={(value) => updateSettings({ customFilename: value })}
           />
         </section>
 

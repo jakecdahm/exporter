@@ -1052,56 +1052,7 @@ type ExportQueueItemPayload = {
   endTicks?: number;
   presetPath: string;
   outputPath: string;
-  filenamePattern?: "seq_clip" | "seq_date" | "clip_only" | "custom";
-  customFilename?: string;
-};
-
-// Build filename from pattern
-// Patterns: seq_clip, seq_date, clip_only, custom
-const claude_buildFilename = (
-  pattern: "seq_clip" | "seq_date" | "clip_only" | "custom" | undefined,
-  customFilename: string | undefined,
-  sequenceName: string,
-  clipName?: string,
-  clipIndex?: number
-): string => {
-  var today = new Date();
-  var dateStr = today.getFullYear() + "-" +
-    ("0" + (today.getMonth() + 1)).slice(-2) + "-" +
-    ("0" + today.getDate()).slice(-2);
-
-  var seqSafe = claude_sanitizeSegment(sequenceName);
-  var clipSafe = clipName ? claude_sanitizeSegment(clipName) : "";
-  var indexStr = clipIndex !== undefined ? String(clipIndex + 1) : "1";
-
-  var result = "";
-
-  if (pattern === "seq_date") {
-    result = seqSafe + "_" + dateStr;
-  } else if (pattern === "clip_only") {
-    result = clipSafe ? clipSafe + "_" + indexStr : seqSafe + "_" + indexStr;
-  } else if (pattern === "custom" && customFilename) {
-    // Parse custom template with tokens
-    result = customFilename;
-    result = result.replace(/\{seq\}/g, seqSafe);
-    result = result.replace(/\{clip\}/g, clipSafe);
-    result = result.replace(/\{i\}/g, indexStr);
-    result = result.replace(/\{date\}/g, dateStr);
-  } else {
-    // Default: seq_clip pattern
-    result = seqSafe;
-    if (clipSafe) {
-      result = result + "_" + clipSafe;
-    }
-    result = result + "_" + indexStr;
-  }
-
-  // Clean up double underscores from empty tokens
-  result = result.replace(/__+/g, "_");
-  // Remove trailing/leading underscores
-  result = result.replace(/^_+|_+$/g, "");
-
-  return result || "export";
+  expectedFilename: string; // Pre-computed filename like "001 - Sequence Name.mp4"
 };
 
 // Export a single queue item directly (for sequential direct export)
@@ -1136,17 +1087,8 @@ export const claude_exportQueueItem = (payload: ExportQueueItemPayload) => {
     }
   }
 
-  // Build filename using pattern
-  var baseName = claude_buildFilename(
-    payload.filenamePattern,
-    payload.customFilename,
-    payload.sequenceName,
-    payload.clipName,
-    payload.clipIndex
-  );
-  var detectedExt = claude_detectExtension(payload.presetPath);
-  var filename = claude_ensureExtension(baseName, detectedExt);
-  var outputFile = new File(folder.fsName + "/" + filename);
+  // Use the pre-computed expectedFilename from payload
+  var outputFile = new File(folder.fsName + "/" + payload.expectedFilename);
 
   // Set in/out points if this is a clip export
   var originalInOut = null;
@@ -1170,7 +1112,34 @@ export const claude_exportQueueItem = (payload: ExportQueueItemPayload) => {
   }
 
   if (success) {
-    return { success: true, outputPath: outputFile.fsName };
+    // Get file size if available (file may still be writing)
+    var fileSize = 0;
+    try {
+      var checkFile = new File(outputFile.fsName);
+      if (checkFile.exists) {
+        checkFile.open("r");
+        fileSize = checkFile.length;
+        checkFile.close();
+      }
+    } catch (sizeErr) {}
+
+    // Calculate duration in seconds from ticks
+    var durationSeconds = 0;
+    if (payload.startTicks !== undefined && payload.endTicks !== undefined) {
+      // Premiere uses 254016000000 ticks per second
+      var ticksPerSecond = 254016000000;
+      durationSeconds = (payload.endTicks - payload.startTicks) / ticksPerSecond;
+    }
+
+    return {
+      success: true,
+      outputPath: outputFile.fsName,
+      filename: payload.expectedFilename,
+      fileSize: fileSize,
+      durationSeconds: durationSeconds,
+      startTicks: payload.startTicks,
+      endTicks: payload.endTicks
+    };
   } else {
     return { error: "Export failed" };
   }
@@ -1227,17 +1196,8 @@ export const claude_queueBatchToAME = (payload: BatchQueuePayload) => {
       }
     }
 
-    // Build filename using pattern
-    var baseName = claude_buildFilename(
-      item.filenamePattern,
-      item.customFilename,
-      item.sequenceName,
-      item.clipName,
-      item.clipIndex
-    );
-    var detectedExt = claude_detectExtension(item.presetPath);
-    var filename = claude_ensureExtension(baseName, detectedExt);
-    var outputFile = new File(folder.fsName + "/" + filename);
+    // Use the pre-computed expectedFilename from payload
+    var outputFile = new File(folder.fsName + "/" + item.expectedFilename);
 
     // Set in/out points if this is a clip export
     var originalInOut = null;

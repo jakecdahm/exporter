@@ -2,6 +2,19 @@ import { useState, useCallback } from "react";
 import { evalTS } from "../../lib/utils/bolt";
 import { PresetAssignment, QueueItem, LogMessage } from "../App";
 import { ExporterSettings } from "./useSettings";
+import { fs, path } from "../../lib/cep/node";
+
+// Export result with file info for logging
+interface ExportResult {
+  filename: string;
+  outputPath: string;
+  sequenceName: string;
+  clipName?: string;
+  durationSeconds: number;
+  fileSize: number;
+  status: "success" | "failed";
+  error?: string;
+}
 
 interface UseQueueOptions {
   settings: ExporterSettings;
@@ -53,52 +66,122 @@ const detectExtension = (presetPath: string): string => {
   return ".mp4";
 };
 
-// Sanitize filename segment
-const sanitizeSegment = (value: string): string => {
-  return value.replace(/[\\/:*?"<>|]/g, "_");
+// Strip common video/audio extensions from a name
+const stripExtension = (name: string): string => {
+  const extensions = [
+    ".mov", ".mp4", ".mxf", ".avi", ".mkv", ".m4v", ".webm",
+    ".wav", ".mp3", ".aac", ".aiff", ".m4a",
+    ".prproj", ".psd", ".ai", ".png", ".jpg", ".jpeg", ".tif", ".tiff"
+  ];
+
+  let result = name;
+  for (const ext of extensions) {
+    if (result.toLowerCase().endsWith(ext)) {
+      result = result.slice(0, -ext.length);
+      break;
+    }
+  }
+  return result;
 };
 
-// Build filename from pattern
+// Sanitize filename segment - removes illegal characters and strips extensions
+const sanitizeSegment = (value: string): string => {
+  const withoutExt = stripExtension(value);
+  return withoutExt.replace(/[\\/:*?"<>|]/g, "_");
+};
+
+// Build filename: "001 - sequence name.ext"
 const buildFilename = (
-  pattern: ExporterSettings["filenamePattern"],
-  customFilename: string,
   sequenceName: string,
-  clipName?: string,
-  clipIndex?: number,
+  clipIndex: number,
   extension: string = ".mp4"
 ): string => {
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
   const seqSafe = sanitizeSegment(sequenceName);
-  const clipSafe = clipName ? sanitizeSegment(clipName) : "";
-  const indexStr = clipIndex !== undefined ? String(clipIndex + 1) : "1";
+  const paddedIndex = String(clipIndex + 1).padStart(3, "0");
 
-  let result = "";
+  return `${paddedIndex} - ${seqSafe}${extension}`;
+};
 
-  if (pattern === "seq_date") {
-    result = `${seqSafe}_${dateStr}`;
-  } else if (pattern === "clip_only") {
-    result = clipSafe ? `${clipSafe}_${indexStr}` : `${seqSafe}_${indexStr}`;
-  } else if (pattern === "custom" && customFilename) {
-    result = customFilename
-      .replace(/\{seq\}/g, seqSafe)
-      .replace(/\{clip\}/g, clipSafe)
-      .replace(/\{i\}/g, indexStr)
-      .replace(/\{date\}/g, dateStr);
-  } else {
-    // Default: seq_clip
-    result = seqSafe;
-    if (clipSafe) {
-      result = `${result}_${clipSafe}`;
-    }
-    result = `${result}_${indexStr}`;
+// Format seconds to HH:MM:SS
+const formatDuration = (seconds: number): string => {
+  if (!seconds || seconds <= 0) return "00:00:00";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+};
+
+// Format bytes to human readable
+const formatFileSize = (bytes: number): string => {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) {
+    size /= 1024;
+    i++;
   }
+  return `${size.toFixed(2)} ${units[i]}`;
+};
 
-  // Clean up double underscores and trim
-  result = result.replace(/_+/g, "_").replace(/^_|_$/g, "");
+// Generate CSV export log
+const generateExportLog = (results: ExportResult[], outputDir: string): string | null => {
+  if (!results.length) return null;
 
-  return (result || "export") + extension;
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}`;
+  const logFilename = `export_log_${timestamp}.csv`;
+  const logPath = path.join(outputDir, logFilename);
+
+  // Calculate totals
+  const successResults = results.filter(r => r.status === "success");
+  const totalClips = results.length;
+  const successCount = successResults.length;
+  const failedCount = results.length - successCount;
+  const totalSize = successResults.reduce((sum, r) => sum + (r.fileSize || 0), 0);
+  const totalDuration = successResults.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
+
+  // Build CSV content
+  const lines: string[] = [];
+
+  // Header info
+  lines.push("EXPORT LOG");
+  lines.push(`Date,${now.toLocaleString()}`);
+  lines.push(`Output Directory,${outputDir}`);
+  lines.push(`Total Clips,${totalClips}`);
+  lines.push(`Successful,${successCount}`);
+  lines.push(`Failed,${failedCount}`);
+  lines.push(`Total Size,${formatFileSize(totalSize)}`);
+  lines.push(`Total Duration,${formatDuration(totalDuration)}`);
+  lines.push("");
+
+  // Column headers
+  lines.push("Index,Filename,Sequence,Clip,Duration,File Size,Status,Error");
+
+  // Data rows
+  results.forEach((r, i) => {
+    const row = [
+      String(i + 1),
+      `"${r.filename}"`,
+      `"${r.sequenceName}"`,
+      `"${r.clipName || ""}"`,
+      formatDuration(r.durationSeconds),
+      formatFileSize(r.fileSize),
+      r.status,
+      `"${r.error || ""}"`
+    ];
+    lines.push(row.join(","));
+  });
+
+  const csvContent = lines.join("\n");
+
+  try {
+    fs.writeFileSync(logPath, csvContent, "utf8");
+    return logPath;
+  } catch (e) {
+    console.error("Failed to write export log:", e);
+    return null;
+  }
 };
 
 export const useQueue = ({
@@ -152,11 +235,8 @@ export const useQueue = ({
           preset,
           outputPath: settings.outputDirectory,
           expectedFilename: buildFilename(
-            settings.filenamePattern,
-            settings.customFilename,
             item.sequenceName,
-            item.clipName,
-            item.clipIndex,
+            item.clipIndex !== undefined ? item.clipIndex : index,
             extension
           ),
           status: "pending" as const,
@@ -192,10 +272,14 @@ export const useQueue = ({
 
     let completed = 0;
     let failed = 0;
+    const exportResults: ExportResult[] = [];
+    let outputDir = "";
 
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i];
       if (item.status !== "pending") continue;
+
+      outputDir = item.outputPath; // Track output directory for log file
 
       setExportProgress(Math.round((i / queue.length) * 100));
       setQueue((prev) =>
@@ -211,8 +295,7 @@ export const useQueue = ({
           endTicks: item.endTicks,
           presetPath: item.preset.path,
           outputPath: item.outputPath,
-          filenamePattern: settings.filenamePattern,
-          customFilename: settings.customFilename,
+          expectedFilename: item.expectedFilename,
         };
 
         const result = await evalTS("claude_exportQueueItem", payload) as any;
@@ -223,17 +306,46 @@ export const useQueue = ({
           );
           failed++;
           addLog("warning", `Failed: ${item.clipName || item.sequenceName} - ${result.error}`);
+          exportResults.push({
+            filename: item.expectedFilename,
+            outputPath: item.outputPath,
+            sequenceName: item.sequenceName,
+            clipName: item.clipName,
+            durationSeconds: 0,
+            fileSize: 0,
+            status: "failed",
+            error: result.error,
+          });
         } else {
           setQueue((prev) =>
             prev.map((q) => (q.id === item.id ? { ...q, status: "completed" } : q))
           );
           completed++;
+          exportResults.push({
+            filename: result.filename || item.expectedFilename,
+            outputPath: result.outputPath || item.outputPath,
+            sequenceName: item.sequenceName,
+            clipName: item.clipName,
+            durationSeconds: result.durationSeconds || 0,
+            fileSize: result.fileSize || 0,
+            status: "success",
+          });
         }
       } catch (error: any) {
         setQueue((prev) =>
           prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q))
         );
         failed++;
+        exportResults.push({
+          filename: item.expectedFilename,
+          outputPath: item.outputPath,
+          sequenceName: item.sequenceName,
+          clipName: item.clipName,
+          durationSeconds: 0,
+          fileSize: 0,
+          status: "failed",
+          error: error?.message || String(error),
+        });
       }
     }
 
@@ -243,6 +355,14 @@ export const useQueue = ({
     setStatusMessage("Ready");
 
     addLog("success", `Direct export complete: ${completed} succeeded, ${failed} failed`);
+
+    // Generate export log CSV
+    if (outputDir && exportResults.length > 0) {
+      const logPath = generateExportLog(exportResults, outputDir);
+      if (logPath) {
+        addLog("info", `Export log saved: ${path.basename(logPath)}`);
+      }
+    }
 
     // Clear completed items after a delay
     setTimeout(() => {
@@ -272,8 +392,7 @@ export const useQueue = ({
         endTicks: item.endTicks,
         presetPath: item.preset.path,
         outputPath: item.outputPath,
-        filenamePattern: settings.filenamePattern,
-        customFilename: settings.customFilename,
+        expectedFilename: item.expectedFilename,
       }));
 
     try {
