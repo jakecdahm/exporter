@@ -7,9 +7,11 @@ import DirectorySelector from "./components/DirectorySelector";
 import ExportOptions from "./components/ExportOptions";
 import PresetModal from "./components/PresetModal";
 import QueuePanel from "./components/QueuePanel";
+import HistoryModal from "./components/HistoryModal";
 import { useSettings } from "./hooks/useSettings";
 import { useExport } from "./hooks/useExport";
 import { useQueue } from "./hooks/useQueue";
+import { useExportHistory } from "./hooks/useExportHistory";
 import { csi, evalES } from "../lib/utils/bolt";
 import { fs } from "../lib/cep/node";
 
@@ -47,7 +49,9 @@ export interface QueueItem {
 
 const App: React.FC = () => {
   const { settings, updateSettings } = useSettings();
+  const { history, addHistoryEntry, clearHistory } = useExportHistory();
   const [logs, setLogs] = useState<LogMessage[]>([]);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [isLogOpen, setIsLogOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -110,6 +114,7 @@ const App: React.FC = () => {
     setIsExporting,
     setExportProgress,
     setStatusMessage,
+    onExportComplete: addHistoryEntry,
   });
 
   const handlePresetClick = (slot: 1 | 2 | 3 | 4 | 5) => {
@@ -155,7 +160,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      <Header onRefresh={loadPresets} />
+      <Header onRefresh={loadPresets} onHistoryClick={() => setHistoryModalOpen(true)} />
 
       <main className="main-content">
         <section className="section">
@@ -250,6 +255,14 @@ const App: React.FC = () => {
             setActivePresetSlot(null);
           }}
           onRefresh={loadPresets}
+        />
+      )}
+
+      {historyModalOpen && (
+        <HistoryModal
+          history={history}
+          onClose={() => setHistoryModalOpen(false)}
+          onClear={clearHistory}
         />
       )}
     </div>

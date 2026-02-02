@@ -26,12 +26,22 @@ interface ExportResult {
   error?: string;
 }
 
+interface ExportSummary {
+  totalItems: number;
+  successCount: number;
+  failedCount: number;
+  totalDurationSeconds: number;
+  totalSizeBytes: number;
+  outputDirectory: string;
+}
+
 interface UseQueueOptions {
   settings: ExporterSettings;
   addLog: (type: LogMessage["type"], message: string) => void;
   setIsExporting: (value: boolean) => void;
   setExportProgress: (value: number) => void;
   setStatusMessage: (value: string) => void;
+  onExportComplete?: (summary: ExportSummary) => void;
 }
 
 interface ClipInfo {
@@ -204,6 +214,7 @@ export const useQueue = ({
   setIsExporting,
   setExportProgress,
   setStatusMessage,
+  onExportComplete,
 }: UseQueueOptions) => {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -373,6 +384,23 @@ export const useQueue = ({
       addLog("warning", `Exported ${completed}, ${failed} failed`);
     } else {
       addLog("success", `Exported ${completed} items`);
+    }
+
+    // Calculate totals for history
+    const successResults = exportResults.filter((r) => r.status === "success");
+    const totalDuration = successResults.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
+    const totalSize = successResults.reduce((sum, r) => sum + (r.fileSize || 0), 0);
+
+    // Add to export history
+    if (onExportComplete && outputDir) {
+      onExportComplete({
+        totalItems: exportResults.length,
+        successCount: completed,
+        failedCount: failed,
+        totalDurationSeconds: totalDuration,
+        totalSizeBytes: totalSize,
+        outputDirectory: outputDir,
+      });
     }
 
     // Generate export log CSV

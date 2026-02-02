@@ -802,6 +802,81 @@ body,
     text-align: center;
     color: var(--text-muted);
   }
+
+  .modal-footer {
+    padding: var(--space-lg) var(--space-xl);
+    border-top: 1px solid var(--border-default);
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+// History Modal
+.history-modal {
+  max-width: 360px;
+
+  .history-empty {
+    padding: var(--space-xxl);
+    text-align: center;
+    color: var(--text-muted);
+  }
+
+  .history-list {
+    padding: var(--space-md) 0;
+  }
+
+  .history-item {
+    padding: var(--space-md) var(--space-xl);
+    border-bottom: 1px solid var(--border-default);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .history-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-xs);
+  }
+
+  .history-date {
+    font-size: var(--font-size-body);
+    color: var(--text-primary);
+  }
+
+  .history-status {
+    font-size: var(--font-size-caption);
+    font-weight: var(--font-weight-medium);
+
+    &.all-success {
+      color: var(--color-success);
+    }
+
+    &.has-failed {
+      color: var(--color-warning);
+    }
+  }
+
+  .history-item-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--font-size-caption);
+    color: var(--text-muted);
+  }
+
+  .history-folder {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
+  }
+
+  .history-stats {
+    flex-shrink: 0;
+    font-family: "SF Mono", Monaco, Menlo, monospace;
+  }
 }
 
 // Queue Panel
