@@ -3,6 +3,7 @@ import { evalTS } from "../../lib/utils/bolt";
 import { PresetAssignment, QueueItem, LogMessage } from "../App";
 import { ExporterSettings } from "./useSettings";
 import { fs, path } from "../../lib/cep/node";
+import { generateFilename, FilenameContext } from "../utils/filenameTokens";
 
 // Export result with file info for logging
 interface ExportResult {
@@ -90,16 +91,20 @@ const sanitizeSegment = (value: string): string => {
   return withoutExt.replace(/[\\/:*?"<>|]/g, "_");
 };
 
-// Build filename: "001 - sequence name.ext"
+// Build filename using template
 const buildFilename = (
+  template: string,
   sequenceName: string,
+  clipName: string | undefined,
   clipIndex: number,
   extension: string = ".mp4"
 ): string => {
-  const seqSafe = sanitizeSegment(sequenceName);
-  const paddedIndex = String(clipIndex + 1).padStart(3, "0");
-
-  return `${paddedIndex} - ${seqSafe}${extension}`;
+  const context: FilenameContext = {
+    index: clipIndex,
+    sequenceName: sequenceName,
+    clipName: clipName,
+  };
+  return generateFilename(template, context, extension);
 };
 
 // Format seconds to HH:MM:SS
@@ -235,7 +240,9 @@ export const useQueue = ({
           preset,
           outputPath: settings.outputDirectory,
           expectedFilename: buildFilename(
+            settings.filenameTemplate,
             item.sequenceName,
+            item.clipName,
             item.clipIndex !== undefined ? item.clipIndex : index,
             extension
           ),
@@ -243,7 +250,7 @@ export const useQueue = ({
         }));
 
         setQueue((prev) => [...prev, ...newItems]);
-        addLog("success", `Added ${newItems.length} item(s) to queue`);
+        addLog("success", `+${newItems.length} items`);
       } catch (error: any) {
         addLog("error", `Failed to add to queue: ${error?.message || error}`);
       }
@@ -257,8 +264,7 @@ export const useQueue = ({
 
   const clearQueue = useCallback(() => {
     setQueue([]);
-    addLog("info", "Queue cleared");
-  }, [addLog]);
+  }, []);
 
   const exportAllDirect = useCallback(async () => {
     if (queue.length === 0) {
@@ -354,13 +360,17 @@ export const useQueue = ({
     setIsProcessing(false);
     setStatusMessage("Ready");
 
-    addLog("success", `Direct export complete: ${completed} succeeded, ${failed} failed`);
+    if (failed > 0) {
+      addLog("warning", `Exported ${completed}, ${failed} failed`);
+    } else {
+      addLog("success", `Exported ${completed} items`);
+    }
 
     // Generate export log CSV
     if (outputDir && exportResults.length > 0) {
       const logPath = generateExportLog(exportResults, outputDir);
       if (logPath) {
-        addLog("info", `Export log saved: ${path.basename(logPath)}`);
+        addLog("info", "Log saved");
       }
     }
 
@@ -402,7 +412,7 @@ export const useQueue = ({
         addLog("error", result.error);
       } else {
         const queued = result?.queued || items.length;
-        addLog("success", `Queued ${queued} item(s) to Media Encoder`);
+        addLog("success", `Queued ${queued} to AME`);
 
         // Mark all as completed
         setQueue((prev) =>

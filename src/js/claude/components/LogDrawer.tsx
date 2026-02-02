@@ -22,6 +22,13 @@ const formatTime = (date: Date): string => {
   });
 };
 
+const LOG_ICONS: Record<LogMessage["type"], string> = {
+  success: "✓",
+  error: "✗",
+  warning: "⚠",
+  info: "→",
+};
+
 const LogDrawer: React.FC<LogDrawerProps> = ({ isOpen, logs }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [copyFeedback, setCopyFeedback] = React.useState(false);
@@ -70,6 +77,7 @@ const LogDrawer: React.FC<LogDrawerProps> = ({ isOpen, logs }) => {
         <div className="log-content" ref={contentRef}>
           {logs.map((log, index) => (
             <div key={index} className={`log-entry ${log.type}`}>
+              <span className="log-icon">{LOG_ICONS[log.type]}</span>
               <span className="log-time">{formatTime(log.timestamp)}</span>
               {log.message}
             </div>

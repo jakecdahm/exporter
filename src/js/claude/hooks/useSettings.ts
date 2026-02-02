@@ -13,6 +13,7 @@ export interface ExporterSettings {
   recentDirectories: string[];
   exportType: "clips" | "sequences";
   exportMethod: "direct" | "ame";
+  filenameTemplate: string;
 }
 
 const STORAGE_KEY = "com.exporter.claude.settings";
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS: ExporterSettings = {
   recentDirectories: [],
   exportType: "clips",
   exportMethod: "direct",
+  filenameTemplate: "{index} - {sequence}",
 };
 
 export const useSettings = () => {

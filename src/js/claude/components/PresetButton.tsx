@@ -2,7 +2,7 @@ import React from "react";
 import { PresetAssignment } from "../App";
 
 interface PresetButtonProps {
-  slot: 1 | 2 | 3;
+  slot: 1 | 2 | 3 | 4 | 5;
   preset: PresetAssignment | null;
   onClick: () => void;
   onAssign: () => void;
@@ -19,6 +19,7 @@ const PresetButton: React.FC<PresetButtonProps> = ({ slot, preset, onClick, onAs
       className={`preset-button ${!preset ? "empty" : ""}`}
       onClick={onClick}
       onContextMenu={handleContextMenu}
+      title={preset ? preset.displayName : "Click to assign preset"}
     >
       <span className="preset-name">{preset ? preset.displayName : "Click to assign"}</span>
       <span className="preset-slot">Preset {slot}</span>

@@ -48,7 +48,7 @@ export interface QueueItem {
 const App: React.FC = () => {
   const { settings, updateSettings } = useSettings();
   const [logs, setLogs] = useState<LogMessage[]>([]);
-  const [isLogOpen, setIsLogOpen] = useState(true); // Start open to show diagnostics
+  const [isLogOpen, setIsLogOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("Ready");
@@ -59,141 +59,33 @@ const App: React.FC = () => {
     setLogs((prev) => [...prev, { timestamp: new Date(), type, message }]);
   }, []);
 
-  // Run diagnostics on mount
+  // Check ExtendScript namespace on mount (silent unless error)
   useEffect(() => {
-    const runDiagnostics = async () => {
-      const hasCep = !!(window.cep || (window as any).__adobe_cep__);
-      addLog("info", `CEP Environment: ${hasCep ? "Yes" : "No"}`);
+    const hasCep = !!(window.cep || (window as any).__adobe_cep__);
+    if (!hasCep) return;
 
-      if (hasCep) {
+    const extRoot = csi.getSystemPath("extension");
+    const jsxPath = `${extRoot}/jsx/index.js`;
+    if (!fs.existsSync(jsxPath)) {
+      addLog("error", "ExtendScript not found");
+      return;
+    }
+
+    // Silently verify namespace exists
+    csi.evalScript(
+      `try {
+        var host = typeof $ !== 'undefined' ? $ : window;
+        JSON.stringify({ nsExists: !!host["com.jakedahm.exporter"] });
+      } catch(e) { JSON.stringify({ error: e.message }); }`,
+      (res: string) => {
         try {
-          const extRoot = csi.getSystemPath("extension");
-          addLog("info", `Extension root: ${extRoot}`);
-
-          const jsxPath = `${extRoot}/jsx/index.js`;
-          const jsxExists = fs.existsSync(jsxPath);
-          addLog("info", `JSX file exists: ${jsxExists}`);
-
-          if (!jsxExists) {
-            addLog("error", `JSX file NOT found at: ${jsxPath}`);
-            // Try listing the jsx directory
-            try {
-              const jsxDir = `${extRoot}/jsx`;
-              const dirResult = fs.readdirSync(jsxDir);
-              addLog("info", `JSX dir contents: ${JSON.stringify(dirResult)}`);
-            } catch (dirErr: any) {
-              addLog("error", `Cannot read jsx dir: ${dirErr?.message || dirErr}`);
-            }
+          const parsed = JSON.parse(res);
+          if (parsed.error || !parsed.nsExists) {
+            addLog("error", "ExtendScript failed to load");
           }
-
-          // Test direct evalScript to check namespace
-          addLog("info", "Testing ExtendScript namespace...");
-          csi.evalScript(
-            `try {
-              var host = typeof $ !== 'undefined' ? $ : window;
-              var ns = "com.jakedahm.exporter";
-              JSON.stringify({
-                hostExists: !!host,
-                nsExists: !!host[ns],
-                nsFunctions: host[ns] ? Object.keys(host[ns]).slice(0, 10) : [],
-                appPath: typeof app !== 'undefined' && app.path ? app.path : 'N/A',
-                bridgeTalk: typeof BridgeTalk !== 'undefined' ? BridgeTalk.appName : 'N/A'
-              });
-            } catch(e) {
-              JSON.stringify({ error: e.message || String(e) });
-            }`,
-            (res: string) => {
-              try {
-                const parsed = JSON.parse(res);
-                if (parsed.error) {
-                  addLog("error", `Namespace check error: ${parsed.error}`);
-                } else {
-                  addLog("info", `Host exists: ${parsed.hostExists}`);
-                  addLog("info", `Namespace exists: ${parsed.nsExists}`);
-                  if (parsed.nsExists && parsed.nsFunctions.length > 0) {
-                    addLog("success", `Functions available: ${parsed.nsFunctions.join(", ")}`);
-                  } else if (!parsed.nsExists) {
-                    addLog("error", "Namespace NOT found - ExtendScript may not have loaded");
-                    addLog("info", `App path: ${parsed.appPath}`);
-                    addLog("info", `BridgeTalk.appName: ${parsed.bridgeTalk}`);
-                  }
-                }
-              } catch (parseErr) {
-                addLog("error", `Parse error: ${res}`);
-              }
-            }
-          );
-
-          // Try to manually evaluate the JSX file if namespace doesn't exist
-          setTimeout(() => {
-            csi.evalScript(
-              `try {
-                var host = typeof $ !== 'undefined' ? $ : window;
-                var ns = "com.jakedahm.exporter";
-                JSON.stringify({ nsExists: !!host[ns] });
-              } catch(e) { JSON.stringify({ error: e.message }); }`,
-              (res: string) => {
-                try {
-                  const parsed = JSON.parse(res);
-                  if (!parsed.nsExists && !parsed.error) {
-                    addLog("warning", "Namespace still missing after 1s - attempting manual load");
-                    const jsxPath2 = `${extRoot}/jsx/index.js`;
-                    // Use raw evalScript with detailed error capture
-                    const escapedPath = jsxPath2.replace(/\\/g, "/");
-                    csi.evalScript(
-                      `(function() {
-                        try {
-                          var f = new File("${escapedPath}");
-                          if (!f.exists) {
-                            return JSON.stringify({ error: "File does not exist: ${escapedPath}" });
-                          }
-                          var result = $.evalFile(f);
-                          var host = typeof $ !== 'undefined' ? $ : window;
-                          var ns = "com.jakedahm.exporter";
-                          return JSON.stringify({
-                            success: true,
-                            evalResult: String(result),
-                            nsExists: !!host[ns],
-                            funcs: host[ns] ? Object.keys(host[ns]).length : 0
-                          });
-                        } catch(e) {
-                          return JSON.stringify({
-                            error: e.message || String(e),
-                            line: e.line || 'unknown',
-                            fileName: e.fileName || 'unknown'
-                          });
-                        }
-                      })()`,
-                      (res2: string) => {
-                        try {
-                          const p2 = JSON.parse(res2);
-                          if (p2.error) {
-                            addLog("error", `Load error: ${p2.error} (line: ${p2.line})`);
-                          } else if (p2.success) {
-                            addLog("info", `Load result: ${p2.evalResult}`);
-                            if (p2.nsExists) {
-                              addLog("success", `Namespace now available with ${p2.funcs} functions`);
-                            } else {
-                              addLog("error", "File loaded but namespace still not set");
-                            }
-                          }
-                        } catch (parseErr) {
-                          addLog("error", `Raw result: ${res2}`);
-                        }
-                      }
-                    );
-                  }
-                } catch { }
-              }
-            );
-          }, 1000);
-        } catch (err: any) {
-          addLog("error", `Diagnostic error: ${err?.message || err}`);
-        }
+        } catch { }
       }
-    };
-
-    runDiagnostics();
+    );
   }, [addLog]);
 
   const { handleExport, availablePresets, loadPresets } = useExport({
@@ -251,14 +143,14 @@ const App: React.FC = () => {
       });
       setPresetModalOpen(false);
       setActivePresetSlot(null);
-      addLog("info", `Assigned "${preset.name}" to Preset ${activePresetSlot}`);
+      addLog("info", `Preset ${activePresetSlot}: ${preset.name}`);
     }
   };
 
   const handleDirectoryChange = (path: string) => {
     const recentDirs = [path, ...settings.recentDirectories.filter((d) => d !== path)].slice(0, 5);
     updateSettings({ outputDirectory: path, recentDirectories: recentDirs });
-    addLog("info", `Output directory set to: ${path}`);
+    addLog("info", `Output: ${path}`);
   };
 
   return (
@@ -280,6 +172,8 @@ const App: React.FC = () => {
           <ExportOptions
             exportType={settings.exportType}
             onExportTypeChange={(value) => updateSettings({ exportType: value })}
+            filenameTemplate={settings.filenameTemplate}
+            onFilenameTemplateChange={(template) => updateSettings({ filenameTemplate: template })}
           />
         </section>
 

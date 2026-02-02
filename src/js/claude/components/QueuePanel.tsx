@@ -19,7 +19,7 @@ const TrashIcon = () => (
 );
 
 const statusColors: Record<QueueItem["status"], string> = {
-  pending: "var(--color-text-secondary)",
+  pending: "var(--text-secondary)",
   exporting: "var(--color-accent)",
   completed: "var(--color-success)",
   failed: "var(--color-error)",
@@ -30,6 +30,26 @@ const statusLabels: Record<QueueItem["status"], string> = {
   exporting: "...",
   completed: "Done",
   failed: "Failed",
+};
+
+// Premiere Pro uses 254016000000 ticks per second
+const TICKS_PER_SECOND = 254016000000;
+
+const formatDuration = (startTicks?: number, endTicks?: number): string => {
+  if (startTicks === undefined || endTicks === undefined) return "";
+
+  const durationTicks = endTicks - startTicks;
+  if (durationTicks <= 0) return "";
+
+  const totalSeconds = Math.floor(durationTicks / TICKS_PER_SECOND);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
 
 const QueuePanel: React.FC<QueuePanelProps> = ({
@@ -43,7 +63,11 @@ const QueuePanel: React.FC<QueuePanelProps> = ({
       <section className="section queue-section">
         <div className="section-label">Export Queue</div>
         <div className="queue-empty">
-          Click a preset button to add clips/sequences to the queue
+          <span className="queue-empty-icon">📦</span>
+          <span>Queue is empty</span>
+          <span className="queue-empty-hint">
+            Select clips/sequences, then click a preset
+          </span>
         </div>
       </section>
     );
@@ -52,7 +76,7 @@ const QueuePanel: React.FC<QueuePanelProps> = ({
   return (
     <section className="section queue-section">
       <div className="section-header">
-        <div className="section-label">Export Queue ({queue.length} items)</div>
+        <div className="section-label">Export Queue ({queue.length})</div>
         <button
           className="text-button"
           onClick={onClear}
@@ -64,33 +88,47 @@ const QueuePanel: React.FC<QueuePanelProps> = ({
       </div>
 
       <div className="queue-list">
-        {queue.map((item) => (
-          <div key={item.id} className={`queue-item queue-item--${item.status}`}>
-            <div className="queue-item-info">
-              <span className="queue-item-name">{item.expectedFilename}</span>
-              <span className="queue-item-preset">{item.preset.displayName}</span>
-            </div>
-            <div className="queue-item-actions">
-              {statusLabels[item.status] && (
-                <span
-                  className="queue-item-status"
-                  style={{ color: statusColors[item.status] }}
-                >
-                  {statusLabels[item.status]}
+        {queue.map((item) => {
+          const duration = formatDuration(item.startTicks, item.endTicks);
+          const fullPath = `${item.outputPath}/${item.expectedFilename}`;
+
+          return (
+            <div key={item.id} className={`queue-item queue-item--${item.status}`}>
+              <div className="queue-item-info">
+                <span className="queue-item-name" title={fullPath}>
+                  {item.expectedFilename}
                 </span>
-              )}
-              {item.status === "pending" && !isProcessing && (
-                <button
-                  className="icon-button icon-button--small"
-                  onClick={() => onRemove(item.id)}
-                  title="Remove from queue"
-                >
-                  <TrashIcon />
-                </button>
-              )}
+                <div className="queue-item-details">
+                  <span className="queue-item-sequence">
+                    {item.clipName || item.sequenceName}
+                  </span>
+                  {duration && (
+                    <span className="queue-item-duration">{duration}</span>
+                  )}
+                </div>
+              </div>
+              <div className="queue-item-actions">
+                {statusLabels[item.status] && (
+                  <span
+                    className="queue-item-status"
+                    style={{ color: statusColors[item.status] }}
+                  >
+                    {statusLabels[item.status]}
+                  </span>
+                )}
+                {item.status === "pending" && !isProcessing && (
+                  <button
+                    className="icon-button icon-button--small"
+                    onClick={() => onRemove(item.id)}
+                    title="Remove from queue"
+                  >
+                    <TrashIcon />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
