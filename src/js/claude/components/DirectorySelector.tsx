@@ -23,6 +23,19 @@ const DirectorySelector: React.FC<DirectorySelectorProps> = ({
     }
   };
 
+  const handleProjectFolder = async () => {
+    try {
+      const result = await evalTS("claude_getProjectDirectory") as any;
+      if (result && result.path) {
+        onChange(result.path);
+      } else if (result && result.error) {
+        console.error("Project folder:", result.error);
+      }
+    } catch (error) {
+      console.error("Failed to get project folder:", error);
+    }
+  };
+
   const getDisplayName = (path: string): string => {
     const parts = path.split(/[/\\]/);
     return parts[parts.length - 1] || path;
@@ -42,20 +55,25 @@ const DirectorySelector: React.FC<DirectorySelectorProps> = ({
           Browse
         </button>
       </div>
-      {recentPaths.length > 0 && (
-        <div className="recent-paths">
-          {recentPaths.slice(0, 5).map((path, index) => (
-            <button
-              key={index}
-              className="recent-path"
-              onClick={() => onChange(path)}
-              title={path}
-            >
-              {getDisplayName(path)}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="recent-paths">
+        <button
+          className="recent-path project-path"
+          onClick={handleProjectFolder}
+          title="Use project file location"
+        >
+          Project
+        </button>
+        {recentPaths.slice(0, 4).map((path, index) => (
+          <button
+            key={index}
+            className="recent-path"
+            onClick={() => onChange(path)}
+            title={path}
+          >
+            {getDisplayName(path)}
+          </button>
+        ))}
+      </div>
     </div>
   );
 };

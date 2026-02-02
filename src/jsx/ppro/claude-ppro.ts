@@ -726,6 +726,22 @@ export const claude_selectOutputFolder = () => {
   }
 };
 
+export const claude_getProjectDirectory = () => {
+  try {
+    if (!app.project || !app.project.path) {
+      return { error: "No project open or project not saved." };
+    }
+    var projectFile = new File(app.project.path);
+    var projectFolder = projectFile.parent;
+    if (projectFolder && projectFolder.exists) {
+      return { path: projectFolder.fsName };
+    }
+    return { error: "Project directory not found." };
+  } catch (error: any) {
+    return { error: "Failed to get project directory: " + (error?.toString?.() || String(error)) };
+  }
+};
+
 export const claude_getSequenceSummary = () => {
   var activeName = null;
   var selectedCount = 0;

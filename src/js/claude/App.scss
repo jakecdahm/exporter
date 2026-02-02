@@ -255,11 +255,21 @@ body,
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: background 0.12s ease, color 0.12s ease;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 
     &:hover {
       background: var(--bg-button);
       color: var(--text-primary);
+    }
+
+    &.project-path {
+      border-color: var(--primary-blue);
+      color: var(--primary-blue);
+
+      &:hover {
+        background: rgba(74, 163, 255, 0.1);
+        color: var(--primary-blue-hover);
+      }
     }
   }
 }
