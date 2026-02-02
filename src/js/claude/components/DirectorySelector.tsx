@@ -1,5 +1,6 @@
 import React from "react";
 import { evalTS } from "../../lib/utils/bolt";
+import { child_process } from "../../lib/cep/node";
 
 interface DirectorySelectorProps {
   currentPath: string;
@@ -36,6 +37,16 @@ const DirectorySelector: React.FC<DirectorySelectorProps> = ({
     }
   };
 
+  const handleOpenFolder = () => {
+    if (!currentPath) return;
+    try {
+      // Use 'open' command on macOS to open folder in Finder
+      child_process.exec(`open "${currentPath}"`);
+    } catch (error) {
+      console.error("Failed to open folder:", error);
+    }
+  };
+
   const getDisplayName = (path: string): string => {
     const parts = path.split(/[/\\]/);
     return parts[parts.length - 1] || path;
@@ -53,6 +64,14 @@ const DirectorySelector: React.FC<DirectorySelectorProps> = ({
         />
         <button className="browse-button" onClick={handleBrowse}>
           Browse
+        </button>
+        <button
+          className="browse-button open-button"
+          onClick={handleOpenFolder}
+          disabled={!currentPath}
+          title="Open in Finder"
+        >
+          Open
         </button>
       </div>
       <div className="recent-paths">

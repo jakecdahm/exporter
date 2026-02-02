@@ -2,8 +2,17 @@ import { useState, useCallback } from "react";
 import { evalTS } from "../../lib/utils/bolt";
 import { PresetAssignment, QueueItem, LogMessage } from "../App";
 import { ExporterSettings } from "./useSettings";
-import { fs, path } from "../../lib/cep/node";
+import { fs, path, child_process } from "../../lib/cep/node";
 import { generateFilename, FilenameContext } from "../utils/filenameTokens";
+
+// Open a folder in Finder (macOS)
+const openInFinder = (folderPath: string) => {
+  try {
+    child_process.exec(`open "${folderPath}"`);
+  } catch (error) {
+    console.error("Failed to open folder:", error);
+  }
+};
 
 // Export result with file info for logging
 interface ExportResult {
@@ -373,6 +382,24 @@ export const useQueue = ({
         addLog("info", "Log saved");
       }
     }
+
+    // Collect unique output directories and open each in Finder
+    const uniqueDirs = new Set<string>();
+    exportResults.forEach((r) => {
+      if (r.status === "success" && r.outputPath) {
+        // Get directory from full file path
+        const dir = path.dirname(r.outputPath);
+        if (dir) uniqueDirs.add(dir);
+      }
+    });
+    // If we only have the outputDir (not full paths), use that
+    if (uniqueDirs.size === 0 && outputDir) {
+      uniqueDirs.add(outputDir);
+    }
+    // Open each unique directory in Finder
+    uniqueDirs.forEach((dir) => {
+      openInFinder(dir);
+    });
 
     // Clear completed items after a delay
     setTimeout(() => {
