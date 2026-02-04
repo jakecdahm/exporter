@@ -90,13 +90,8 @@ export const useExport = ({
     }
   }, [addLog, setStatusMessage]);
 
-  useEffect(() => {
-    // Delay initial load to give ExtendScript time to initialize
-    const timer = setTimeout(() => {
-      loadPresets();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [loadPresets]);
+  // Presets are loaded on-demand via the refresh button in Header/PresetModal
+  // This avoids auto-launching Media Encoder when the panel opens
 
   const handleExport = useCallback(
     async (preset: PresetAssignment) => {
