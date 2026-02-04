@@ -742,6 +742,79 @@ export const claude_getProjectDirectory = () => {
   }
 };
 
+export const claude_getProjectName = () => {
+  try {
+    if (!app.project || !app.project.path) {
+      return { name: null };
+    }
+    var projectFile = new File(app.project.path);
+    return { name: projectFile.name };
+  } catch (error: any) {
+    return { name: null };
+  }
+};
+
+type RenameClipsPayload = {
+  template: string;
+};
+
+export const claude_renameSelectedClips = (payload: RenameClipsPayload) => {
+  var sequence = claude_getActiveSequence();
+  if (!sequence) {
+    return { error: "No active sequence" };
+  }
+
+  var clips = claude_uniqueClips(claude_getSelectedClips(sequence));
+  if (!clips.length) {
+    return { error: "No clips selected" };
+  }
+
+  var renamed = 0;
+  var errors: string[] = [];
+
+  for (var i = 0; i < clips.length; i++) {
+    var clip = clips[i];
+    // Generate padded index
+    var paddedIndex = String(i + 1);
+    while (paddedIndex.length < 3) {
+      paddedIndex = "0" + paddedIndex;
+    }
+
+    var seqName = sequence.name || "Sequence";
+    var clipName = clip.name || (clip.projectItem ? clip.projectItem.name : "Clip");
+
+    // Apply template
+    var newName = payload.template;
+    newName = newName.replace(/\{index\}/g, paddedIndex);
+    newName = newName.replace(/\{sequence\}/g, seqName);
+    newName = newName.replace(/\{clip\}/g, clipName);
+
+    // Remove file extension if present (for display name)
+    newName = newName.replace(/\.[a-zA-Z0-9]+$/, "");
+
+    // Try to rename the clip
+    try {
+      // Method 1: Direct name property assignment
+      clip.name = newName;
+      renamed++;
+    } catch (e1) {
+      // Method 2: Try projectItem.name as fallback
+      try {
+        if (clip.projectItem) {
+          clip.projectItem.name = newName;
+          renamed++;
+        } else {
+          errors.push(clipName);
+        }
+      } catch (e2) {
+        errors.push(clipName);
+      }
+    }
+  }
+
+  return { renamed: renamed, total: clips.length, errors: errors };
+};
+
 export const claude_getSequenceSummary = () => {
   var activeName = null;
   var selectedCount = 0;

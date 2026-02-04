@@ -210,6 +210,8 @@ body,
     height: var(--height-input);
     font-size: var(--font-size-body);
     outline: none;
+    direction: rtl;
+    text-align: left;
 
     &:focus {
       border-color: var(--primary-blue);
@@ -394,6 +396,21 @@ body,
         padding: var(--space-xs) var(--space-md);
         border-radius: var(--radius-small);
         border: 1px solid var(--border-default);
+        flex: 1;
+      }
+
+      .rename-button {
+        margin-left: auto;
+        color: var(--primary-blue);
+
+        &:hover {
+          color: var(--primary-blue-hover);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
       }
     }
   }

@@ -6,6 +6,7 @@ interface ExportOptionsProps {
   onExportTypeChange: (value: "clips" | "sequences") => void;
   filenameTemplate: string;
   onFilenameTemplateChange: (template: string) => void;
+  onLog?: (type: "info" | "success" | "error" | "warning", message: string) => void;
 }
 
 const ExportOptions: React.FC<ExportOptionsProps> = ({
@@ -13,6 +14,7 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({
   onExportTypeChange,
   filenameTemplate,
   onFilenameTemplateChange,
+  onLog,
 }) => {
   return (
     <div className="export-options">
@@ -37,6 +39,7 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({
       <FilenameCustomizer
         template={filenameTemplate}
         onTemplateChange={onFilenameTemplateChange}
+        onLog={onLog}
       />
     </div>
   );

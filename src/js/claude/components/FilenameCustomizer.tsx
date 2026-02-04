@@ -1,18 +1,22 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { TOKENS, SEPARATORS, generatePreview, DEFAULT_TEMPLATE } from "../utils/filenameTokens";
+import { evalTS } from "../../lib/utils/bolt";
 
 interface FilenameCustomizerProps {
   template: string;
   onTemplateChange: (template: string) => void;
   extension?: string;
+  onLog?: (type: "info" | "success" | "error" | "warning", message: string) => void;
 }
 
 const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
   template,
   onTemplateChange,
   extension = ".mp4",
+  onLog,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
 
   const insertAtCursor = (text: string) => {
     const input = inputRef.current;
@@ -42,6 +46,32 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
   const handleReset = () => {
     onTemplateChange(DEFAULT_TEMPLATE);
     inputRef.current?.focus();
+  };
+
+  const handleRename = async () => {
+    if (isRenaming) return;
+
+    setIsRenaming(true);
+    try {
+      const result = (await evalTS("claude_renameSelectedClips", {
+        template: template || DEFAULT_TEMPLATE,
+      })) as any;
+
+      if (result && result.error) {
+        onLog?.("warning", result.error);
+      } else if (result) {
+        const count = result.renamed || 0;
+        if (count > 0) {
+          onLog?.("success", `Renamed ${count} clips`);
+        } else {
+          onLog?.("warning", "No clips renamed");
+        }
+      }
+    } catch (error: any) {
+      onLog?.("error", `Rename failed: ${error?.message || error}`);
+    } finally {
+      setIsRenaming(false);
+    }
   };
 
   const preview = generatePreview(template || DEFAULT_TEMPLATE, extension);
@@ -105,6 +135,15 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
       <div className="filename-preview">
         <span className="preview-label">Preview:</span>
         <span className="preview-value">{preview}</span>
+        <button
+          type="button"
+          className="text-button rename-button"
+          onClick={handleRename}
+          disabled={isRenaming}
+          title="Rename selected clips to match this filename pattern"
+        >
+          {isRenaming ? "Renaming..." : "Rename"}
+        </button>
       </div>
     </div>
   );

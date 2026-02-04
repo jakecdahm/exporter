@@ -179,6 +179,7 @@ const App: React.FC = () => {
             onExportTypeChange={(value) => updateSettings({ exportType: value })}
             filenameTemplate={settings.filenameTemplate}
             onFilenameTemplateChange={(template) => updateSettings({ filenameTemplate: template })}
+            onLog={addLog}
           />
         </section>
 

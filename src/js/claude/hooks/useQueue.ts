@@ -5,6 +5,9 @@ import { ExporterSettings } from "./useSettings";
 import { fs, path, child_process } from "../../lib/cep/node";
 import { generateFilename, FilenameContext } from "../utils/filenameTokens";
 
+// Fixed log directory for CSV exports
+const LOG_DIRECTORY = "/Users/jakedahm/Library/Mobile Documents/com~apple~CloudDocs/Temp/Exporter Logs";
+
 // Open a folder in Finder (macOS)
 const openInFinder = (folderPath: string) => {
   try {
@@ -12,6 +15,39 @@ const openInFinder = (folderPath: string) => {
   } catch (error) {
     console.error("Failed to open folder:", error);
   }
+};
+
+// Get project base name (strips date prefix and extension)
+const getProjectBaseName = async (): Promise<string> => {
+  try {
+    const result = (await evalTS("claude_getProjectName")) as any;
+    if (!result || !result.name) return "export";
+
+    // Remove .prproj extension
+    let name = result.name.replace(/\.prproj$/i, "");
+    // Remove leading date pattern (XX_XX_XX-)
+    name = name.replace(/^\d{2}_\d{2}_\d{2}-/, "");
+    return name || "export";
+  } catch {
+    return "export";
+  }
+};
+
+// Format log filename: 02_04_26 - 8:03AM - project-name.csv
+const formatLogFilename = (projectName: string): string => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const year = String(now.getFullYear()).slice(-2);
+  const date = `${month}_${day}_${year}`;
+
+  const hours = now.getHours();
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  const time = `${hour12}:${minutes}${ampm}`;
+
+  return `${date} - ${time} - ${projectName}.csv`;
 };
 
 // Export result with file info for logging
@@ -148,17 +184,31 @@ const formatFileSize = (bytes: number): string => {
   return `${size.toFixed(2)} ${units[i]}`;
 };
 
-// Generate CSV export log
-const generateExportLog = (results: ExportResult[], outputDir: string): string | null => {
-  if (!results.length) return null;
+// Ensure log directory exists
+const ensureLogDirectory = (): boolean => {
+  try {
+    if (!fs.existsSync(LOG_DIRECTORY)) {
+      fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
+    }
+    return true;
+  } catch (e) {
+    console.error("Failed to create log directory:", e);
+    return false;
+  }
+};
+
+// Write/update CSV export log (called after each item completes)
+const writeExportLog = (
+  logPath: string,
+  results: ExportResult[],
+  outputDir: string
+): boolean => {
+  if (!results.length) return false;
 
   const now = new Date();
-  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}`;
-  const logFilename = `export_log_${timestamp}.csv`;
-  const logPath = path.join(outputDir, logFilename);
 
   // Calculate totals
-  const successResults = results.filter(r => r.status === "success");
+  const successResults = results.filter((r) => r.status === "success");
   const totalClips = results.length;
   const successCount = successResults.length;
   const failedCount = results.length - successCount;
@@ -192,7 +242,7 @@ const generateExportLog = (results: ExportResult[], outputDir: string): string |
       formatDuration(r.durationSeconds),
       formatFileSize(r.fileSize),
       r.status,
-      `"${r.error || ""}"`
+      `"${r.error || ""}"`,
     ];
     lines.push(row.join(","));
   });
@@ -201,10 +251,10 @@ const generateExportLog = (results: ExportResult[], outputDir: string): string |
 
   try {
     fs.writeFileSync(logPath, csvContent, "utf8");
-    return logPath;
+    return true;
   } catch (e) {
     console.error("Failed to write export log:", e);
-    return null;
+    return false;
   }
 };
 
@@ -301,6 +351,14 @@ export const useQueue = ({
     const exportResults: ExportResult[] = [];
     let outputDir = "";
 
+    // Setup log file path at start (for incremental writing)
+    let logPath = "";
+    if (ensureLogDirectory()) {
+      const projectName = await getProjectBaseName();
+      const logFilename = formatLogFilename(projectName);
+      logPath = path.join(LOG_DIRECTORY, logFilename);
+    }
+
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i];
       if (item.status !== "pending") continue;
@@ -324,7 +382,7 @@ export const useQueue = ({
           expectedFilename: item.expectedFilename,
         };
 
-        const result = await evalTS("claude_exportQueueItem", payload) as any;
+        const result = (await evalTS("claude_exportQueueItem", payload)) as any;
 
         if (result && result.error) {
           setQueue((prev) =>
@@ -373,6 +431,11 @@ export const useQueue = ({
           error: error?.message || String(error),
         });
       }
+
+      // Write/update log file after each item (real-time updates)
+      if (logPath && outputDir && exportResults.length > 0) {
+        writeExportLog(logPath, exportResults, outputDir);
+      }
     }
 
     setExportProgress(100);
@@ -403,12 +466,9 @@ export const useQueue = ({
       });
     }
 
-    // Generate export log CSV
-    if (outputDir && exportResults.length > 0) {
-      const logPath = generateExportLog(exportResults, outputDir);
-      if (logPath) {
-        addLog("info", "Log saved");
-      }
+    // Log file was written incrementally, just notify user
+    if (logPath) {
+      addLog("info", "Log saved");
     }
 
     // Collect unique output directories and open each in Finder

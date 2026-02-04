@@ -502,6 +502,8 @@ export {
   claude_selectOutputFolder,
   claude_getSequenceSummary,
   claude_getProjectDirectory,
+  claude_getProjectName,
+  claude_renameSelectedClips,
   claude_queueExport,
   claude_queueSelectedClips,
   claude_exportDirect,
