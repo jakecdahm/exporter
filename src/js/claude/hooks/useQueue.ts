@@ -55,11 +55,11 @@ interface ExportResult {
   filename: string;
   outputPath: string;
   sequenceName: string;
-  clipName?: string;
-  durationSeconds: number;
+  directory: string;
+  clipDurationSeconds: number;
+  exportDurationSeconds: number;
   fileSize: number;
   status: "success" | "failed";
-  error?: string;
 }
 
 interface ExportSummary {
@@ -213,7 +213,8 @@ const writeExportLog = (
   const successCount = successResults.length;
   const failedCount = results.length - successCount;
   const totalSize = successResults.reduce((sum, r) => sum + (r.fileSize || 0), 0);
-  const totalDuration = successResults.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
+  const totalClipDuration = successResults.reduce((sum, r) => sum + (r.clipDurationSeconds || 0), 0);
+  const totalExportDuration = results.reduce((sum, r) => sum + (r.exportDurationSeconds || 0), 0);
 
   // Build CSV content
   const lines: string[] = [];
@@ -226,11 +227,12 @@ const writeExportLog = (
   lines.push(`Successful,${successCount}`);
   lines.push(`Failed,${failedCount}`);
   lines.push(`Total Size,${formatFileSize(totalSize)}`);
-  lines.push(`Total Duration,${formatDuration(totalDuration)}`);
+  lines.push(`Total Clip Duration,${formatDuration(totalClipDuration)}`);
+  lines.push(`Total Export Time,${formatDuration(totalExportDuration)}`);
   lines.push("");
 
   // Column headers
-  lines.push("Index,Filename,Sequence,Clip,Duration,File Size,Status,Error");
+  lines.push("Index,Filename,Sequence,Directory,Clip Duration,Export Duration,Filesize,Status");
 
   // Data rows
   results.forEach((r, i) => {
@@ -238,11 +240,11 @@ const writeExportLog = (
       String(i + 1),
       `"${r.filename}"`,
       `"${r.sequenceName}"`,
-      `"${r.clipName || ""}"`,
-      formatDuration(r.durationSeconds),
+      `"${r.directory}"`,
+      formatDuration(r.clipDurationSeconds),
+      formatDuration(r.exportDurationSeconds),
       formatFileSize(r.fileSize),
       r.status,
-      `"${r.error || ""}"`,
     ];
     lines.push(row.join(","));
   });
@@ -364,11 +366,15 @@ export const useQueue = ({
       if (item.status !== "pending") continue;
 
       outputDir = item.outputPath; // Track output directory for log file
+      const directory = path.basename(item.outputPath); // Just the folder name
 
       setExportProgress(Math.round((i / queue.length) * 100));
       setQueue((prev) =>
         prev.map((q) => (q.id === item.id ? { ...q, status: "exporting" } : q))
       );
+
+      // Track export time
+      const exportStartTime = Date.now();
 
       try {
         const payload = {
@@ -383,6 +389,7 @@ export const useQueue = ({
         };
 
         const result = (await evalTS("claude_exportQueueItem", payload)) as any;
+        const exportDurationSeconds = (Date.now() - exportStartTime) / 1000;
 
         if (result && result.error) {
           setQueue((prev) =>
@@ -394,11 +401,11 @@ export const useQueue = ({
             filename: item.expectedFilename,
             outputPath: item.outputPath,
             sequenceName: item.sequenceName,
-            clipName: item.clipName,
-            durationSeconds: 0,
+            directory,
+            clipDurationSeconds: 0,
+            exportDurationSeconds,
             fileSize: 0,
             status: "failed",
-            error: result.error,
           });
         } else {
           setQueue((prev) =>
@@ -409,13 +416,15 @@ export const useQueue = ({
             filename: result.filename || item.expectedFilename,
             outputPath: result.outputPath || item.outputPath,
             sequenceName: item.sequenceName,
-            clipName: item.clipName,
-            durationSeconds: result.durationSeconds || 0,
+            directory,
+            clipDurationSeconds: result.durationSeconds || 0,
+            exportDurationSeconds,
             fileSize: result.fileSize || 0,
             status: "success",
           });
         }
       } catch (error: any) {
+        const exportDurationSeconds = (Date.now() - exportStartTime) / 1000;
         setQueue((prev) =>
           prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q))
         );
@@ -424,11 +433,11 @@ export const useQueue = ({
           filename: item.expectedFilename,
           outputPath: item.outputPath,
           sequenceName: item.sequenceName,
-          clipName: item.clipName,
-          durationSeconds: 0,
+          directory,
+          clipDurationSeconds: 0,
+          exportDurationSeconds,
           fileSize: 0,
           status: "failed",
-          error: error?.message || String(error),
         });
       }
 
@@ -451,7 +460,7 @@ export const useQueue = ({
 
     // Calculate totals for history
     const successResults = exportResults.filter((r) => r.status === "success");
-    const totalDuration = successResults.reduce((sum, r) => sum + (r.durationSeconds || 0), 0);
+    const totalDuration = successResults.reduce((sum, r) => sum + (r.clipDurationSeconds || 0), 0);
     const totalSize = successResults.reduce((sum, r) => sum + (r.fileSize || 0), 0);
 
     // Add to export history
