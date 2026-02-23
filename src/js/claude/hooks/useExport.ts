@@ -90,8 +90,12 @@ export const useExport = ({
     }
   }, [addLog, setStatusMessage]);
 
-  // Presets are loaded on-demand via the refresh button in Header/PresetModal
-  // This avoids auto-launching Media Encoder when the panel opens
+  // Auto-load presets on mount (this launches Media Encoder which is required for exports)
+  useEffect(() => {
+    if (!isInitialized) {
+      loadPresets();
+    }
+  }, [isInitialized, loadPresets]);
 
   const handleExport = useCallback(
     async (preset: PresetAssignment) => {

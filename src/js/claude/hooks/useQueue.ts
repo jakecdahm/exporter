@@ -1,12 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { evalTS } from "../../lib/utils/bolt";
-import { PresetAssignment, QueueItem, LogMessage } from "../App";
+import { PresetAssignment, QueueItem, TrackVisibility, LogMessage, STILL_EXPORT_PRESET } from "../App";
 import { ExporterSettings } from "./useSettings";
 import { fs, path, child_process } from "../../lib/cep/node";
 import { generateFilename, FilenameContext } from "../utils/filenameTokens";
-
-// Fixed log directory for CSV exports
-const LOG_DIRECTORY = "/Users/jakedahm/Library/Mobile Documents/com~apple~CloudDocs/Temp/Exporter Logs";
 
 // Open a folder in Finder (macOS)
 const openInFinder = (folderPath: string) => {
@@ -185,10 +182,11 @@ const formatFileSize = (bytes: number): string => {
 };
 
 // Ensure log directory exists
-const ensureLogDirectory = (): boolean => {
+const ensureLogDirectory = (logDirectory: string): boolean => {
   try {
-    if (!fs.existsSync(LOG_DIRECTORY)) {
-      fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
+    if (!logDirectory) return false;
+    if (!fs.existsSync(logDirectory)) {
+      fs.mkdirSync(logDirectory, { recursive: true });
     }
     return true;
   } catch (e) {
@@ -260,6 +258,8 @@ const writeExportLog = (
   }
 };
 
+const QUEUE_STORAGE_KEY = "com.exporter.claude.queue";
+
 export const useQueue = ({
   settings,
   addLog,
@@ -270,65 +270,221 @@ export const useQueue = ({
 }: UseQueueOptions) => {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [exportTrigger, setExportTrigger] = useState(false);
+  const projectKeyRef = useRef<string>("");
+
+  // Restore queue from localStorage for a given project key
+  const restoreQueue = useCallback((key: string) => {
+    try {
+      const stored = localStorage.getItem(QUEUE_STORAGE_KEY);
+      if (stored) {
+        const allQueues = JSON.parse(stored) as Record<string, QueueItem[]>;
+        const items = allQueues[key] || [];
+        const restored = items
+          .map((item: QueueItem) => ({
+            ...item,
+            status: item.status === "exporting" ? ("pending" as const) : item.status,
+          }))
+          .filter((item: QueueItem) => item.status === "pending");
+        if (restored.length > 0) {
+          setQueue(restored);
+          addLog("info", `Restored ${restored.length} queued items`);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to restore queue:", e);
+    }
+  }, [addLog]);
+
+  // Load persisted queue on mount (needs async project name lookup)
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const result = (await evalTS("claude_getProjectName")) as any;
+        const key = result?.name || "default";
+        projectKeyRef.current = key;
+
+        if (key === "default") {
+          // Project may not be ready yet, retry after delay
+          setTimeout(async () => {
+            try {
+              const retry = (await evalTS("claude_getProjectName")) as any;
+              const retryKey = retry?.name || "default";
+              if (retryKey !== "default") {
+                projectKeyRef.current = retryKey;
+                restoreQueue(retryKey);
+              }
+            } catch { /* silent */ }
+          }, 2000);
+          return;
+        }
+
+        restoreQueue(key);
+      } catch (e) {
+        console.error("Failed to load persisted queue:", e);
+      }
+    };
+    init();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist queue to localStorage whenever it changes (project-scoped)
+  useEffect(() => {
+    if (!projectKeyRef.current) return;
+    try {
+      const toSave = queue.filter((item) => item.status === "pending" || item.status === "exporting");
+      const stored = localStorage.getItem(QUEUE_STORAGE_KEY);
+      const allQueues = stored ? (JSON.parse(stored) as Record<string, QueueItem[]>) : {};
+
+      if (toSave.length > 0) {
+        allQueues[projectKeyRef.current] = toSave;
+      } else {
+        delete allQueues[projectKeyRef.current];
+      }
+
+      if (Object.keys(allQueues).length > 0) {
+        localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(allQueues));
+      } else {
+        localStorage.removeItem(QUEUE_STORAGE_KEY);
+      }
+    } catch (e) {
+      console.error("Failed to persist queue:", e);
+    }
+  }, [queue]);
 
   const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   const addToQueue = useCallback(
-    async (preset: PresetAssignment) => {
+    async (preset: PresetAssignment): Promise<boolean> => {
       if (!settings.outputDirectory) {
         addLog("error", "Please select an output directory first");
-        return;
+        return false;
       }
 
-      if (!preset.path) {
+      const isStillsMode = settings.exportType === "markers" && settings.markerSubMode === "stills";
+
+      if (!isStillsMode && !preset.path) {
         addLog("error", "Preset path not available. Please reassign the preset.");
-        return;
+        return false;
       }
 
       try {
-        // Get current sequence/clip info from Premiere
-        const result = await evalTS("claude_getQueueInfo", {
-          exportType: settings.exportType,
-        }) as any;
+        let result: any;
+
+        if (settings.exportType === "markers") {
+          if (settings.markerSubMode === "video") {
+            // Video mode: get marker positions with before/after durations
+            result = await evalTS("claude_getMarkerQueueInfo", {
+              secondsBefore: settings.markerSecondsBefore,
+              secondsAfter: settings.markerSecondsAfter,
+            });
+          } else {
+            // Stills mode: just need marker positions
+            const markerResult = await evalTS("claude_getMarkerInfo", {}) as any;
+            if (markerResult && markerResult.markers) {
+              result = {
+                items: markerResult.markers.map((m: any, i: number) => ({
+                  sequenceName: markerResult.sequenceName,
+                  markerName: m.name,
+                  markerIndex: i,
+                  markerTicks: m.ticks,
+                  clipIndex: i,
+                })),
+              };
+            } else {
+              result = markerResult; // Pass through error
+            }
+          }
+        } else {
+          // Existing clips/sequences logic
+          result = await evalTS("claude_getQueueInfo", {
+            exportType: settings.exportType,
+          });
+        }
 
         if (result && result.error) {
           addLog("error", result.error);
-          return;
+          return false;
         }
 
         if (!result || !result.items || result.items.length === 0) {
-          addLog("warning", "No sequences or clips to add to queue");
-          return;
+          addLog("warning", "No items to add to queue");
+          return false;
         }
 
-        const extension = detectExtension(preset.path);
-        const newItems: QueueItem[] = result.items.map((item: any, index: number) => ({
-          id: generateId(),
-          sequenceName: item.sequenceName,
-          clipName: item.clipName,
-          clipIndex: item.clipIndex,
-          startTicks: item.startTicks,
-          endTicks: item.endTicks,
-          preset,
-          outputPath: settings.outputDirectory,
-          expectedFilename: buildFilename(
-            settings.filenameTemplate,
-            item.sequenceName,
-            item.clipName,
-            item.clipIndex !== undefined ? item.clipIndex : index,
-            extension
-          ),
-          status: "pending" as const,
-        }));
+        // Filter markers by selected colors
+        if (settings.exportType === "markers" && settings.markerColorFilter) {
+          const allowedColors = settings.markerColorFilter;
+          result.items = result.items.filter(
+            (item: any) => item.colorIndex === undefined || allowedColors.includes(item.colorIndex)
+          );
+          if (result.items.length === 0) {
+            addLog("warning", "No markers match the selected colors");
+            return false;
+          }
+        }
+
+        // Snapshot track visibility at queue time (skip for stills)
+        let trackVisibility: TrackVisibility | undefined;
+        if (!isStillsMode) {
+          try {
+            const visResult = await evalTS("claude_getTrackVisibility") as any;
+            if (visResult && !visResult.error) {
+              trackVisibility = {
+                videoClips: visResult.videoClips,
+                audioClips: visResult.audioClips,
+                videoTrackMutes: visResult.videoTrackMutes,
+                audioTrackMutes: visResult.audioTrackMutes,
+              };
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
+
+        const effectivePreset = isStillsMode ? STILL_EXPORT_PRESET : preset;
+        const extension = isStillsMode ? ".jpg" : detectExtension(preset.path);
+
+        const newItems: QueueItem[] = result.items.map((item: any, index: number) => {
+          const context: FilenameContext = {
+            index: item.clipIndex !== undefined ? item.clipIndex : index,
+            sequenceName: item.sequenceName,
+            clipName: item.clipName,
+            markerName: item.markerName,
+          };
+
+          return {
+            id: generateId(),
+            sequenceName: item.sequenceName,
+            clipName: item.clipName,
+            clipIndex: item.clipIndex,
+            startTicks: item.startTicks,
+            endTicks: item.endTicks,
+            preset: effectivePreset,
+            outputPath: settings.outputDirectory,
+            expectedFilename: generateFilename(settings.filenameTemplate, context, extension),
+            useInOut: item.useInOut || settings.exportType === "markers",
+            trackVisibility,
+            status: "pending" as const,
+            markerName: item.markerName,
+            markerTicks: item.markerTicks,
+            isStillExport: isStillsMode,
+          };
+        });
 
         setQueue((prev) => [...prev, ...newItems]);
         addLog("success", `+${newItems.length} items`);
+        return true;
       } catch (error: any) {
         addLog("error", `Failed to add to queue: ${error?.message || error}`);
+        return false;
       }
     },
     [settings, addLog]
   );
+
+  const addStillsToQueue = useCallback(async (): Promise<boolean> => {
+    return addToQueue(STILL_EXPORT_PRESET);
+  }, [addToQueue]);
 
   const removeFromQueue = useCallback((id: string) => {
     setQueue((prev) => prev.filter((item) => item.id !== id));
@@ -346,32 +502,131 @@ export const useQueue = ({
 
     setIsProcessing(true);
     setIsExporting(true);
-    setStatusMessage("Exporting...");
 
     let completed = 0;
     let failed = 0;
     const exportResults: ExportResult[] = [];
     let outputDir = "";
+    const totalPending = queue.filter((q) => q.status === "pending").length;
+    let currentItem = 0;
 
-    // Setup log file path at start (for incremental writing)
+    setStatusMessage(`0/${totalPending}`);
+
+    // Setup log file path at start (for incremental writing) - only if logging is enabled
     let logPath = "";
-    if (ensureLogDirectory()) {
-      const projectName = await getProjectBaseName();
-      const logFilename = formatLogFilename(projectName);
-      logPath = path.join(LOG_DIRECTORY, logFilename);
+    if (settings.logEnabled && settings.logDirectory) {
+      try {
+        if (ensureLogDirectory(settings.logDirectory)) {
+          const projectName = await getProjectBaseName();
+          const logFilename = formatLogFilename(projectName);
+          logPath = path.join(settings.logDirectory, logFilename);
+        }
+      } catch (logSetupError) {
+        console.error("Failed to setup log path:", logSetupError);
+        // Continue with export even if logging fails
+      }
     }
 
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i];
       if (item.status !== "pending") continue;
 
+      currentItem++;
       outputDir = item.outputPath; // Track output directory for log file
-      const directory = path.basename(item.outputPath); // Just the folder name
+      // Get just the folder name for directory column
+      let directory = item.outputPath;
+      try {
+        directory = path.basename(item.outputPath) || item.outputPath;
+      } catch {
+        // Use full path if basename fails
+      }
 
-      setExportProgress(Math.round((i / queue.length) * 100));
+      setStatusMessage(`${currentItem}/${totalPending}`);
+      setExportProgress(Math.round((currentItem / totalPending) * 100));
       setQueue((prev) =>
         prev.map((q) => (q.id === item.id ? { ...q, status: "exporting" } : q))
       );
+
+      // Restore track visibility snapshot before exporting this item
+      if (item.trackVisibility) {
+        try {
+          await evalTS("claude_setTrackVisibility", item.trackVisibility);
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // Stills export path - export JPEG frame directly
+      if (item.isStillExport && item.markerTicks !== undefined) {
+        const exportStartTime = Date.now();
+        try {
+          const jpgPath = path.join(item.outputPath, item.expectedFilename);
+          const result = (await evalTS("claude_exportFrameJPEG", {
+            timeTicks: item.markerTicks,
+            outputFilePath: jpgPath,
+          })) as any;
+          const exportDurationSeconds = (Date.now() - exportStartTime) / 1000;
+
+          if (result && result.error) {
+            setQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q))
+            );
+            failed++;
+            addLog("warning", `Failed: ${item.markerName || item.expectedFilename} - ${result.error}`);
+            exportResults.push({
+              filename: item.expectedFilename,
+              outputPath: item.outputPath,
+              sequenceName: item.sequenceName,
+              directory,
+              clipDurationSeconds: 0,
+              exportDurationSeconds,
+              fileSize: 0,
+              status: "failed",
+            });
+          } else {
+            setQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: "completed" } : q))
+            );
+            completed++;
+            exportResults.push({
+              filename: item.expectedFilename,
+              outputPath: jpgPath,
+              sequenceName: item.sequenceName,
+              directory,
+              clipDurationSeconds: 0,
+              exportDurationSeconds,
+              fileSize: result.fileSize || 0,
+              status: "success",
+            });
+          }
+        } catch (error: any) {
+          const exportDurationSeconds = (Date.now() - exportStartTime) / 1000;
+          setQueue((prev) =>
+            prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q))
+          );
+          failed++;
+          exportResults.push({
+            filename: item.expectedFilename,
+            outputPath: item.outputPath,
+            sequenceName: item.sequenceName,
+            directory,
+            clipDurationSeconds: 0,
+            exportDurationSeconds,
+            fileSize: 0,
+            status: "failed",
+          });
+        }
+
+        // Write/update log file after each item
+        try {
+          if (logPath && outputDir && exportResults.length > 0) {
+            writeExportLog(logPath, exportResults, outputDir);
+          }
+        } catch (logWriteError) {
+          console.error("Failed to write export log:", logWriteError);
+        }
+        continue; // Skip the normal video export path
+      }
 
       // Track export time
       const exportStartTime = Date.now();
@@ -383,6 +638,7 @@ export const useQueue = ({
           clipIndex: item.clipIndex,
           startTicks: item.startTicks,
           endTicks: item.endTicks,
+          useInOut: item.useInOut,
           presetPath: item.preset.path,
           outputPath: item.outputPath,
           expectedFilename: item.expectedFilename,
@@ -422,6 +678,32 @@ export const useQueue = ({
             fileSize: result.fileSize || 0,
             status: "success",
           });
+
+          // Write .cuts.json alongside the video if enabled
+          if (settings.exportCutsJson) {
+            try {
+              const editPoints = await evalTS("claude_getEditPoints", {
+                sequenceName: item.sequenceName,
+                inPointTicks: item.startTicks,
+                outPointTicks: item.endTicks,
+              }) as any;
+
+              if (editPoints && !editPoints.error && editPoints.cuts) {
+                const videoFilePath = path.join(item.outputPath, result.filename || item.expectedFilename);
+                const jsonPath = videoFilePath.replace(/\.[^.]+$/, ".cuts.json");
+                const cutsData = {
+                  sequence: item.sequenceName,
+                  track: editPoints.trackName || "V1",
+                  clipCount: editPoints.clipCount || 0,
+                  cuts: editPoints.cuts,
+                };
+                fs.writeFileSync(jsonPath, JSON.stringify(cutsData, null, 2), "utf8");
+              }
+            } catch (cutsErr) {
+              // Non-fatal: don't fail the export over cuts JSON
+              addLog("warning", "Failed to write cuts JSON");
+            }
+          }
         }
       } catch (error: any) {
         const exportDurationSeconds = (Date.now() - exportStartTime) / 1000;
@@ -442,8 +724,13 @@ export const useQueue = ({
       }
 
       // Write/update log file after each item (real-time updates)
-      if (logPath && outputDir && exportResults.length > 0) {
-        writeExportLog(logPath, exportResults, outputDir);
+      try {
+        if (logPath && outputDir && exportResults.length > 0) {
+          writeExportLog(logPath, exportResults, outputDir);
+        }
+      } catch (logWriteError) {
+        console.error("Failed to write export log:", logWriteError);
+        // Continue with export even if logging fails
       }
     }
 
@@ -482,13 +769,17 @@ export const useQueue = ({
 
     // Collect unique output directories and open each in Finder
     const uniqueDirs = new Set<string>();
-    exportResults.forEach((r) => {
-      if (r.status === "success" && r.outputPath) {
-        // Get directory from full file path
-        const dir = path.dirname(r.outputPath);
-        if (dir) uniqueDirs.add(dir);
-      }
-    });
+    try {
+      exportResults.forEach((r) => {
+        if (r.status === "success" && r.outputPath) {
+          // Get directory from full file path
+          const dir = path.dirname(r.outputPath);
+          if (dir) uniqueDirs.add(dir);
+        }
+      });
+    } catch {
+      // Ignore path errors
+    }
     // If we only have the outputDir (not full paths), use that
     if (uniqueDirs.size === 0 && outputDir) {
       uniqueDirs.add(outputDir);
@@ -503,7 +794,7 @@ export const useQueue = ({
       setQueue((prev) => prev.filter((q) => q.status !== "completed"));
       setExportProgress(0);
     }, 2000);
-  }, [queue, addLog, setIsExporting, setExportProgress, setStatusMessage]);
+  }, [queue, settings.logEnabled, settings.logDirectory, settings.exportCutsJson, addLog, setIsExporting, setExportProgress, setStatusMessage, onExportComplete]);
 
   const queueAllToAME = useCallback(async () => {
     if (queue.length === 0) {
@@ -515,39 +806,137 @@ export const useQueue = ({
     setIsExporting(true);
     setStatusMessage("Queuing to AME...");
 
-    // Collect all items to send in a single batch
-    const items = queue
-      .filter((item) => item.status === "pending")
-      .map((item) => ({
-        sequenceName: item.sequenceName,
-        clipName: item.clipName,
-        clipIndex: item.clipIndex,
-        startTicks: item.startTicks,
-        endTicks: item.endTicks,
-        presetPath: item.preset.path,
-        outputPath: item.outputPath,
-        expectedFilename: item.expectedFilename,
-      }));
+    // Separate stills from video items (stills can't go to AME)
+    const allPending = queue.filter((item) => item.status === "pending");
+    const stillItems = allPending.filter((item) => item.isStillExport);
+    const pendingItems = allPending.filter((item) => !item.isStillExport);
+
+    // Export stills directly (they bypass AME)
+    if (stillItems.length > 0) {
+      for (const item of stillItems) {
+        if (item.markerTicks === undefined) continue;
+        setQueue((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, status: "exporting" } : q))
+        );
+        try {
+          const jpgPath = path.join(item.outputPath, item.expectedFilename);
+          const result = (await evalTS("claude_exportFrameJPEG", {
+            timeTicks: item.markerTicks,
+            outputFilePath: jpgPath,
+          })) as any;
+          if (result && result.error) {
+            setQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q))
+            );
+            addLog("warning", `Failed: ${item.markerName || item.expectedFilename} - ${result.error}`);
+          } else {
+            setQueue((prev) =>
+              prev.map((q) => (q.id === item.id ? { ...q, status: "completed" } : q))
+            );
+          }
+        } catch {
+          setQueue((prev) =>
+            prev.map((q) => (q.id === item.id ? { ...q, status: "failed" } : q))
+          );
+        }
+      }
+      if (stillItems.length > 0) {
+        addLog("success", `Exported ${stillItems.length} stills`);
+      }
+    }
+
+    // Group remaining video items by track visibility so each group gets the right state
+    const groups: { visibility: TrackVisibility | undefined; items: typeof pendingItems }[] = [];
+    for (const item of pendingItems) {
+      const key = item.trackVisibility ? JSON.stringify(item.trackVisibility) : "";
+      const existing = groups.find((g) =>
+        (g.visibility ? JSON.stringify(g.visibility) : "") === key
+      );
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        groups.push({ visibility: item.trackVisibility, items: [item] });
+      }
+    }
 
     try {
-      const result = await evalTS("claude_queueBatchToAME", { items }) as any;
+      let totalQueued = 0;
+      const allErrors: string[] = [];
 
-      if (result && result.error) {
-        addLog("error", result.error);
-      } else {
-        const queued = result?.queued || items.length;
-        addLog("success", `Queued ${queued} to AME`);
+      for (const group of groups) {
+        // Restore track visibility for this group
+        if (group.visibility) {
+          try {
+            await evalTS("claude_setTrackVisibility", group.visibility);
+          } catch {
+            // Non-fatal
+          }
+        }
 
-        // Mark all as completed
-        setQueue((prev) =>
-          prev.map((q) => (q.status === "pending" ? { ...q, status: "completed" } : q))
-        );
+        const items = group.items.map((item) => ({
+          sequenceName: item.sequenceName,
+          clipName: item.clipName,
+          clipIndex: item.clipIndex,
+          startTicks: item.startTicks,
+          endTicks: item.endTicks,
+          useInOut: item.useInOut,
+          presetPath: item.preset.path,
+          outputPath: item.outputPath,
+          expectedFilename: item.expectedFilename,
+        }));
 
-        // Clear completed items after a delay
-        setTimeout(() => {
-          setQueue((prev) => prev.filter((q) => q.status !== "completed"));
-        }, 2000);
+        const result = await evalTS("claude_queueBatchToAME", { items }) as any;
+
+        if (result && result.error) {
+          allErrors.push(result.error);
+        } else {
+          totalQueued += result?.queued || items.length;
+
+          // Write .cuts.json for each item if enabled
+          if (settings.exportCutsJson) {
+            for (const item of items) {
+              try {
+                const editPoints = await evalTS("claude_getEditPoints", {
+                  sequenceName: item.sequenceName,
+                  inPointTicks: item.startTicks,
+                  outPointTicks: item.endTicks,
+                }) as any;
+
+                if (editPoints && !editPoints.error && editPoints.cuts) {
+                  const videoFilePath = path.join(item.outputPath, item.expectedFilename);
+                  const jsonPath = videoFilePath.replace(/\.[^.]+$/, ".cuts.json");
+                  const cutsData = {
+                    sequence: item.sequenceName,
+                    track: editPoints.trackName || "V1",
+                    clipCount: editPoints.clipCount || 0,
+                    cuts: editPoints.cuts,
+                  };
+                  fs.writeFileSync(jsonPath, JSON.stringify(cutsData, null, 2), "utf8");
+                }
+              } catch {
+                // Non-fatal
+              }
+            }
+          }
+        }
       }
+
+      if (allErrors.length > 0) {
+        addLog("error", allErrors.join("; "));
+      }
+      if (totalQueued > 0) {
+        addLog("success", `Queued ${totalQueued} to AME`);
+      }
+
+      // Mark all as completed
+      setQueue((prev) =>
+        prev.map((q) => (q.status === "pending" ? { ...q, status: "completed" } : q))
+      );
+
+      // Clear completed items after a delay
+      setTimeout(() => {
+        setQueue((prev) => prev.filter((q) => q.status !== "completed"));
+      }, 2000);
     } catch (error: any) {
       addLog("error", `Failed to queue to AME: ${error?.message || error}`);
     }
@@ -557,15 +946,53 @@ export const useQueue = ({
     setIsProcessing(false);
     setStatusMessage("Ready");
     setTimeout(() => setExportProgress(0), 1000);
-  }, [queue, addLog, setIsExporting, setExportProgress, setStatusMessage]);
+  }, [queue, settings.exportCutsJson, addLog, setIsExporting, setExportProgress, setStatusMessage]);
+
+  // Auto-export trigger: fires after addAndExport adds items to queue
+  useEffect(() => {
+    if (!exportTrigger || isProcessing) return;
+    if (!queue.some((q) => q.status === "pending")) {
+      setExportTrigger(false);
+      return;
+    }
+    setExportTrigger(false);
+    if (settings.exportMethod === "direct") {
+      exportAllDirect();
+    } else {
+      queueAllToAME();
+    }
+  }, [exportTrigger, queue, isProcessing, settings.exportMethod, exportAllDirect, queueAllToAME]);
+
+  const addAndExport = useCallback(
+    async (preset: PresetAssignment) => {
+      const added = await addToQueue(preset);
+      if (added) {
+        setExportTrigger(true);
+      }
+    },
+    [addToQueue]
+  );
+
+  const loadSavedQueueItems = useCallback((items: QueueItem[]) => {
+    const loaded = items.map((item) => ({
+      ...item,
+      id: generateId(),
+      status: "pending" as const,
+    }));
+    setQueue((prev) => [...prev, ...loaded]);
+    addLog("info", `Loaded ${loaded.length} items from saved queue`);
+  }, [addLog]);
 
   return {
     queue,
     addToQueue,
+    addAndExport,
+    addStillsToQueue,
     removeFromQueue,
     clearQueue,
     exportAllDirect,
     queueAllToAME,
     isProcessing,
+    loadSavedQueueItems,
   };
 };

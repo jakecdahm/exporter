@@ -15,6 +15,7 @@ export const TOKENS: TokenDef[] = [
   { key: "{index}", label: "Index", display: "001", description: "Zero-padded number" },
   { key: "{sequence}", label: "Sequence", display: "Sequence", description: "Sequence name" },
   { key: "{clip}", label: "Clip", display: "Clip", description: "Clip name (if exporting clips)" },
+  { key: "{marker}", label: "Marker", display: "Marker", description: "Marker name (if exporting markers)" },
 ];
 
 export const SEPARATORS: SeparatorDef[] = [
@@ -27,6 +28,7 @@ export interface FilenameContext {
   index: number;
   sequenceName: string;
   clipName?: string;
+  markerName?: string;
 }
 
 // Generate filename from template
@@ -48,6 +50,7 @@ export const generateFilename = (
   result = result.replace(/\{index\}/g, paddedIndex);
   result = result.replace(/\{sequence\}/g, sanitize(context.sequenceName));
   result = result.replace(/\{clip\}/g, sanitize(context.clipName || context.sequenceName));
+  result = result.replace(/\{marker\}/g, sanitize(context.markerName || "Marker"));
 
   // Ensure extension
   if (!result.toLowerCase().endsWith(extension.toLowerCase())) {
@@ -63,6 +66,7 @@ export const generatePreview = (template: string, extension: string = ".mp4"): s
     index: 0,
     sequenceName: "My Sequence",
     clipName: "My Clip",
+    markerName: "My Marker",
   };
   return generateFilename(template, sampleContext, extension);
 };
@@ -88,5 +92,8 @@ const sanitize = (value: string): string => {
   return result.replace(/[\\/:*?"<>|]/g, "_");
 };
 
-// Default template
+// Default templates
 export const DEFAULT_TEMPLATE = "{index} - {sequence}";
+export const DEFAULT_TEMPLATE_CLIPS = "{index} - {sequence}";
+export const DEFAULT_TEMPLATE_SEQUENCES = "{sequence}";
+export const DEFAULT_TEMPLATE_MARKERS = "{index} - {marker}";

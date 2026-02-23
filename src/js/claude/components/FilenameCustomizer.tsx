@@ -9,6 +9,19 @@ interface FilenameCustomizerProps {
   onLog?: (type: "info" | "success" | "error" | "warning", message: string) => void;
 }
 
+const ClearIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+  </svg>
+);
+
+const ResetIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <path fillRule="evenodd" d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2v1z"/>
+    <path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466z"/>
+  </svg>
+);
+
 const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
   template,
   onTemplateChange,
@@ -78,7 +91,19 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
 
   return (
     <div className="filename-customizer">
-      <div className="filename-label">Filename:</div>
+      <div className="filename-header">
+        <span className="filename-label">Filename:</span>
+        <span className="filename-preview-value">{preview}</span>
+        <button
+          type="button"
+          className="rename-button"
+          onClick={handleRename}
+          disabled={isRenaming}
+          title="Rename selected clips to match this filename pattern"
+        >
+          {isRenaming ? "Renaming..." : "Rename"}
+        </button>
+      </div>
 
       <div className="filename-input-row">
         <input
@@ -91,19 +116,19 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
         />
         <button
           type="button"
-          className="text-button"
+          className="icon-button small"
           onClick={handleClear}
           title="Clear template"
         >
-          Clear
+          <ClearIcon />
         </button>
         <button
           type="button"
-          className="text-button"
+          className="icon-button small"
           onClick={handleReset}
           title="Reset to default"
         >
-          Reset
+          <ResetIcon />
         </button>
       </div>
 
@@ -130,20 +155,6 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
             {sep.label}
           </button>
         ))}
-      </div>
-
-      <div className="filename-preview">
-        <span className="preview-label">Preview:</span>
-        <span className="preview-value">{preview}</span>
-        <button
-          type="button"
-          className="text-button rename-button"
-          onClick={handleRename}
-          disabled={isRenaming}
-          title="Rename selected clips to match this filename pattern"
-        >
-          {isRenaming ? "Renaming..." : "Rename"}
-        </button>
       </div>
     </div>
   );

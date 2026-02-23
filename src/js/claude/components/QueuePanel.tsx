@@ -5,8 +5,15 @@ interface QueuePanelProps {
   queue: QueueItem[];
   onRemove: (id: string) => void;
   onClear: () => void;
+  onSaveQueue: () => void;
   isProcessing: boolean;
 }
+
+const SaveIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4.414a1 1 0 0 0-.293-.707L11.293 1.293A1 1 0 0 0 10.586 1H2zm0 1h8.586L13 4.414V14H3V2h-1zm2 7h8v4H4V9zm1 1v2h6v-2H5zm0-6h4v3H5V4zm1 1v1h2V5H6z" />
+  </svg>
+);
 
 const TrashIcon = () => (
   <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
@@ -56,8 +63,11 @@ const QueuePanel: React.FC<QueuePanelProps> = ({
   queue,
   onRemove,
   onClear,
+  onSaveQueue,
   isProcessing,
 }) => {
+  const hasPending = queue.some((item) => item.status === "pending");
+
   if (queue.length === 0) {
     return (
       <section className="section queue-section">
@@ -77,35 +87,40 @@ const QueuePanel: React.FC<QueuePanelProps> = ({
     <section className="section queue-section">
       <div className="section-header">
         <div className="section-label">Export Queue ({queue.length})</div>
-        <button
-          className="text-button"
-          onClick={onClear}
-          disabled={isProcessing}
-          title="Clear all"
-        >
-          Clear
-        </button>
+        <div className="section-header-actions">
+          {hasPending && !isProcessing && (
+            <button
+              className="icon-button icon-button--small"
+              onClick={onSaveQueue}
+              title="Save queue"
+            >
+              <SaveIcon />
+            </button>
+          )}
+          <button
+            className="text-button"
+            onClick={onClear}
+            disabled={isProcessing}
+            title="Clear all"
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
       <div className="queue-list">
         {queue.map((item) => {
-          const duration = formatDuration(item.startTicks, item.endTicks);
-          const fullPath = `${item.outputPath}/${item.expectedFilename}`;
+          const folderName = item.outputPath.split(/[/\\]/).pop() || item.outputPath;
 
           return (
             <div key={item.id} className={`queue-item queue-item--${item.status}`}>
               <div className="queue-item-info">
-                <span className="queue-item-name" title={fullPath}>
+                <span className="queue-item-name" title={`${item.outputPath}/${item.expectedFilename}`}>
                   {item.expectedFilename}
                 </span>
-                <div className="queue-item-details">
-                  <span className="queue-item-sequence">
-                    {item.clipName || item.sequenceName}
-                  </span>
-                  {duration && (
-                    <span className="queue-item-duration">{duration}</span>
-                  )}
-                </div>
+                <span className="queue-item-folder" title={item.outputPath}>
+                  {folderName}
+                </span>
               </div>
               <div className="queue-item-actions">
                 {statusLabels[item.status] && (

@@ -511,4 +511,11 @@ export {
   claude_getQueueInfo,
   claude_exportQueueItem,
   claude_queueBatchToAME,
+  claude_getEditPoints,
+  claude_getTrackVisibility,
+  claude_setTrackVisibility,
+  claude_getMarkerInfo,
+  claude_getMarkerQueueInfo,
+  claude_exportFrameJPEG,
+  claude_validatePresetPath,
 } from "./claude-ppro";

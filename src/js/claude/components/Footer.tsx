@@ -8,8 +8,7 @@ interface FooterProps {
   exportMethod: "direct" | "ame";
   onExportMethodChange: (method: "direct" | "ame") => void;
   onExport: () => void;
-  isLogOpen: boolean;
-  onToggleLog: () => void;
+  onLogClick: () => void;
 }
 
 const LogIcon = () => (
@@ -27,8 +26,7 @@ const Footer: React.FC<FooterProps> = ({
   exportMethod,
   onExportMethodChange,
   onExport,
-  isLogOpen,
-  onToggleLog,
+  onLogClick,
 }) => {
   const canExport = queueCount > 0 && !isExporting;
 
@@ -68,9 +66,9 @@ const Footer: React.FC<FooterProps> = ({
         <div className="footer-right">
           <span className="status-text">{status}</span>
           <button
-            className={`icon-button ${isLogOpen ? "active" : ""}`}
-            onClick={onToggleLog}
-            title="Toggle log"
+            className="icon-button"
+            onClick={onLogClick}
+            title="View logs"
           >
             <LogIcon />
           </button>

@@ -471,7 +471,7 @@ const claude_debugSearchFolder = (folder: any, presetName: string, log: string[]
 // Store last resolved preset path for debugging
 var claude_lastResolvedPreset = "";
 
-const claude_queueEncode = (sequence: any, outputPath: string, presetPath: string, workAreaType?: number) => {
+const claude_queueEncode = (sequence: any, outputPath: string, presetPath: string, workAreaType?: number, skipStartBatch?: boolean) => {
   if (!app.encoder) {
     return { success: false, error: "No encoder" };
   }
@@ -494,8 +494,8 @@ const claude_queueEncode = (sequence: any, outputPath: string, presetPath: strin
     // Try with removeOnCompletion = false (0) to keep in queue
     var result = app.encoder.encodeSequence(sequence, outputPath, actualPresetPath, workAreaType || app.encoder.ENCODE_ENTIRE, 0);
 
-    // Try starting the batch after queueing
-    if (app.encoder.startBatch) {
+    // Start batch unless caller will handle it (e.g. batch queueing)
+    if (!skipStartBatch && app.encoder.startBatch) {
       try {
         app.encoder.startBatch();
       } catch (batchErr) {
@@ -1070,6 +1070,246 @@ export const claude_exportSelectedClipsDirect = (payload: ClaudeQueuePayload) =>
   return { queued: queued, clips: clips.length };
 };
 
+// ===== SEQUENCE STATE SNAPSHOT =====
+
+// Capture full sequence state: clip enabled/disabled + track mute states
+export const claude_getTrackVisibility = () => {
+  var sequence = claude_getActiveSequence();
+  if (!sequence) {
+    return { error: "No active sequence." };
+  }
+
+  var videoClips: boolean[][] = [];
+  var audioClips: boolean[][] = [];
+  var videoTrackMutes: number[] = [];
+  var audioTrackMutes: number[] = [];
+
+  for (var v = 0; v < sequence.videoTracks.numTracks; v++) {
+    var vTrack = sequence.videoTracks[v];
+
+    // Track mute state (eye icon)
+    try {
+      videoTrackMutes.push(vTrack.isMuted() ? 1 : 0);
+    } catch (e) {
+      videoTrackMutes.push(0);
+    }
+
+    // Clip disabled states
+    var trackClips: boolean[] = [];
+    for (var vc = 0; vc < vTrack.clips.numItems; vc++) {
+      try {
+        trackClips.push(vTrack.clips[vc].disabled ? true : false);
+      } catch (e) {
+        trackClips.push(false);
+      }
+    }
+    videoClips.push(trackClips);
+  }
+
+  for (var a = 0; a < sequence.audioTracks.numTracks; a++) {
+    var aTrack = sequence.audioTracks[a];
+
+    // Track mute state
+    try {
+      audioTrackMutes.push(aTrack.isMuted() ? 1 : 0);
+    } catch (e) {
+      audioTrackMutes.push(0);
+    }
+
+    // Clip disabled states
+    var aTrackClips: boolean[] = [];
+    for (var ac = 0; ac < aTrack.clips.numItems; ac++) {
+      try {
+        aTrackClips.push(aTrack.clips[ac].disabled ? true : false);
+      } catch (e) {
+        aTrackClips.push(false);
+      }
+    }
+    audioClips.push(aTrackClips);
+  }
+
+  return {
+    videoClips: videoClips,
+    audioClips: audioClips,
+    videoTrackMutes: videoTrackMutes,
+    audioTrackMutes: audioTrackMutes,
+  };
+};
+
+type SequenceStatePayload = {
+  videoClips: boolean[][];
+  audioClips: boolean[][];
+  videoTrackMutes?: number[];
+  audioTrackMutes?: number[];
+};
+
+// Restore full sequence state: clip enabled/disabled + track mute states
+export const claude_setTrackVisibility = (payload: SequenceStatePayload) => {
+  var sequence = claude_getActiveSequence();
+  if (!sequence) {
+    return { error: "No active sequence." };
+  }
+
+  var applied = 0;
+
+  // Restore video track mutes
+  if (payload.videoTrackMutes) {
+    for (var vm = 0; vm < payload.videoTrackMutes.length; vm++) {
+      if (vm >= sequence.videoTracks.numTracks) continue;
+      try {
+        sequence.videoTracks[vm].setMute(payload.videoTrackMutes[vm]);
+        applied++;
+      } catch (e) {}
+    }
+  }
+
+  // Restore audio track mutes
+  if (payload.audioTrackMutes) {
+    for (var am = 0; am < payload.audioTrackMutes.length; am++) {
+      if (am >= sequence.audioTracks.numTracks) continue;
+      try {
+        sequence.audioTracks[am].setMute(payload.audioTrackMutes[am]);
+        applied++;
+      } catch (e) {}
+    }
+  }
+
+  // Restore video clip disabled states
+  if (payload.videoClips) {
+    for (var v = 0; v < payload.videoClips.length; v++) {
+      if (v >= sequence.videoTracks.numTracks) continue;
+      var vTrack = sequence.videoTracks[v];
+      for (var vc = 0; vc < payload.videoClips[v].length; vc++) {
+        if (vc >= vTrack.clips.numItems) continue;
+        try {
+          vTrack.clips[vc].disabled = payload.videoClips[v][vc];
+          applied++;
+        } catch (e) {}
+      }
+    }
+  }
+
+  // Restore audio clip disabled states
+  if (payload.audioClips) {
+    for (var a = 0; a < payload.audioClips.length; a++) {
+      if (a >= sequence.audioTracks.numTracks) continue;
+      var aTrack = sequence.audioTracks[a];
+      for (var ac = 0; ac < payload.audioClips[a].length; ac++) {
+        if (ac >= aTrack.clips.numItems) continue;
+        try {
+          aTrack.clips[ac].disabled = payload.audioClips[a][ac];
+          applied++;
+        } catch (e) {}
+      }
+    }
+  }
+
+  return { applied: applied };
+};
+
+// ===== EDIT POINT DETECTION =====
+
+type EditPointsPayload = {
+  sequenceName: string;
+  inPointTicks?: number;
+  outPointTicks?: number;
+};
+
+export const claude_getEditPoints = (payload: EditPointsPayload) => {
+  if (!app.project || !app.project.sequences) {
+    return { error: "No project open." };
+  }
+
+  // Find the sequence by name
+  var sequence = null;
+  for (var i = 0; i < app.project.sequences.numSequences; i++) {
+    var seq = app.project.sequences[i];
+    if (seq && seq.name === payload.sequenceName) {
+      sequence = seq;
+      break;
+    }
+  }
+
+  if (!sequence) {
+    return { error: "Sequence not found: " + payload.sequenceName };
+  }
+
+  // Find highest active video track (iterate from top down)
+  var trackIndex = -1;
+  var activeTrack = null;
+  for (var t = sequence.videoTracks.numTracks - 1; t >= 0; t--) {
+    var track = sequence.videoTracks[t];
+    if (track && track.clips && track.clips.numItems > 0) {
+      trackIndex = t;
+      activeTrack = track;
+      break;
+    }
+  }
+
+  if (!activeTrack) {
+    return { error: "No video tracks with clips found." };
+  }
+
+  // Determine range bounds
+  var TICKS_PER_SECOND = 254016000000;
+  var rangeStart = payload.inPointTicks !== undefined ? payload.inPointTicks : 0;
+  var rangeEnd = payload.outPointTicks !== undefined ? payload.outPointTicks : 0;
+
+  // If no outPoint specified, use the end of the last clip on this track
+  if (rangeEnd === 0) {
+    for (var c = 0; c < activeTrack.clips.numItems; c++) {
+      var cl = activeTrack.clips[c];
+      if (cl && cl.end && cl.end.ticks > rangeEnd) {
+        rangeEnd = cl.end.ticks;
+      }
+    }
+  }
+
+  // Collect all clip boundaries (start and end ticks)
+  var boundaries: number[] = [];
+  var clipCount = 0;
+  for (var ci = 0; ci < activeTrack.clips.numItems; ci++) {
+    var clip = activeTrack.clips[ci];
+    if (!clip) continue;
+    var clipStart = clip.start ? clip.start.ticks : 0;
+    var clipEnd = clip.end ? clip.end.ticks : 0;
+
+    // Only count clips that overlap the range
+    if (clipEnd <= rangeStart || clipStart >= rangeEnd) continue;
+    clipCount++;
+
+    boundaries.push(clipStart);
+    boundaries.push(clipEnd);
+  }
+
+  // Sort and deduplicate
+  boundaries.sort(function (a, b) { return a - b; });
+  var unique: number[] = [];
+  for (var u = 0; u < boundaries.length; u++) {
+    if (u === 0 || boundaries[u] !== boundaries[u - 1]) {
+      unique.push(boundaries[u]);
+    }
+  }
+
+  // Filter to within range, exclude the range start and end themselves
+  // Convert to seconds relative to rangeStart
+  var cuts: number[] = [];
+  for (var f = 0; f < unique.length; f++) {
+    var tick = unique[f];
+    if (tick <= rangeStart || tick >= rangeEnd) continue;
+    var seconds = (tick - rangeStart) / TICKS_PER_SECOND;
+    // Round to 4 decimal places
+    cuts.push(Math.round(seconds * 10000) / 10000);
+  }
+
+  return {
+    cuts: cuts,
+    trackIndex: trackIndex,
+    trackName: "V" + (trackIndex + 1),
+    clipCount: clipCount,
+  };
+};
+
 // ===== QUEUE FUNCTIONS =====
 
 type QueueInfoPayload = {
@@ -1082,6 +1322,7 @@ type QueueItemInfo = {
   clipIndex?: number;
   startTicks?: number;
   endTicks?: number;
+  useInOut?: boolean;
 };
 
 // Get info about sequences/clips to add to queue (without exporting)
@@ -1125,17 +1366,44 @@ export const claude_getQueueInfo = (payload: QueueInfoPayload) => {
     for (var j = 0; j < sequences.length; j++) {
       var seq = sequences[j];
       // Get sequence duration (end time)
-      var endTicks = 0;
+      var seqEndTicks = 0;
       try {
         if (seq.end && seq.end.ticks) {
-          endTicks = seq.end.ticks;
+          seqEndTicks = Number(seq.end.ticks);
         }
       } catch (e) {}
+
+      // Check for in/out points
+      var startTicks = 0;
+      var endTicks = seqEndTicks;
+      var useInOut = false;
+
+      try {
+        var ioPoints = claude_getSequenceInOut(seq);
+        if (ioPoints.inPoint !== null && ioPoints.inPoint !== undefined) {
+          var inTicks = Number(ioPoints.inPoint);
+          if (!isNaN(inTicks) && inTicks >= 0) {
+            startTicks = inTicks;
+          }
+        }
+        if (ioPoints.outPoint !== null && ioPoints.outPoint !== undefined) {
+          var outTicks = Number(ioPoints.outPoint);
+          if (!isNaN(outTicks) && outTicks > 0) {
+            endTicks = outTicks;
+          }
+        }
+        // If in/out differ from the full sequence range, use in/out mode
+        if (startTicks > 0 || (endTicks > 0 && endTicks < seqEndTicks)) {
+          useInOut = true;
+        }
+      } catch (e) {}
+
       items.push({
         sequenceName: seq.name || "Sequence",
         clipIndex: j,
-        startTicks: 0,
+        startTicks: startTicks,
         endTicks: endTicks,
+        useInOut: useInOut,
       });
     }
   }
@@ -1149,6 +1417,7 @@ type ExportQueueItemPayload = {
   clipIndex?: number;
   startTicks?: number;
   endTicks?: number;
+  useInOut?: boolean;
   presetPath: string;
   outputPath: string;
   expectedFilename: string; // Pre-computed filename like "001 - Sequence Name.mp4"
@@ -1196,8 +1465,8 @@ export const claude_exportQueueItem = (payload: ExportQueueItemPayload) => {
     claude_setSequenceInOut(sequence, payload.startTicks, payload.endTicks);
   }
 
-  // Export
-  var workAreaType = payload.clipName ? 1 : 0; // 1 = in/out, 0 = entire
+  // Export: use in/out mode for clips or sequences with in/out points set
+  var workAreaType = (payload.clipName || payload.useInOut) ? 1 : 0; // 1 = in/out, 0 = entire
   var success = claude_directExport(sequence, outputFile.fsName, payload.presetPath, workAreaType);
 
   // Restore in/out points
@@ -1305,8 +1574,8 @@ export const claude_queueBatchToAME = (payload: BatchQueuePayload) => {
       claude_setSequenceInOut(sequence, item.startTicks, item.endTicks);
     }
 
-    var workAreaType = item.clipName ? app.encoder.ENCODE_IN_TO_OUT : app.encoder.ENCODE_ENTIRE;
-    var result = claude_queueEncode(sequence, outputFile.fsName, item.presetPath, workAreaType);
+    var workAreaType = (item.clipName || item.useInOut) ? app.encoder.ENCODE_IN_TO_OUT : app.encoder.ENCODE_ENTIRE;
+    var result = claude_queueEncode(sequence, outputFile.fsName, item.presetPath, workAreaType, true);
 
     // Restore in/out points
     if (originalInOut) {
@@ -1333,4 +1602,219 @@ export const claude_queueBatchToAME = (payload: BatchQueuePayload) => {
   }
 
   return { queued: queued, errors: errors };
+};
+
+// ===== MARKER FUNCTIONS =====
+
+type MarkerInfoPayload = {};
+
+// Get all markers from the active sequence
+export const claude_getMarkerInfo = (payload: MarkerInfoPayload) => {
+  var sequence = claude_getActiveSequence();
+  if (!sequence) {
+    return { error: "No active sequence." };
+  }
+  if (!sequence.markers) {
+    return { error: "Markers not available in this sequence." };
+  }
+
+  var markers: any[] = [];
+
+  // Use getFirstMarker/getNextMarker iterator pattern (bracket indexing is unreliable)
+  var marker: any = null;
+  try { marker = sequence.markers.getFirstMarker(); } catch (e) {}
+
+  if (!marker) {
+    return { error: "No markers found in the active sequence." };
+  }
+
+  var i = 0;
+  while (marker) {
+    var name = "";
+    try { name = marker.name || ""; } catch (e) {}
+    var comments = "";
+    try { comments = marker.comments || ""; } catch (e) {}
+    var ticks = 0;
+    try {
+      if (marker.start && marker.start.ticks) {
+        ticks = Number(marker.start.ticks);
+      }
+    } catch (e) {}
+    var colorIndex = 0;
+    try { colorIndex = marker.getColorByIndex(i); } catch (e) {}
+
+    markers.push({
+      name: name || ("Marker " + (i + 1)),
+      ticks: ticks,
+      index: i,
+      comments: comments,
+      colorIndex: colorIndex,
+    });
+
+    i++;
+    try { marker = sequence.markers.getNextMarker(marker); } catch (e) { marker = null; }
+  }
+
+  if (!markers.length) {
+    return { error: "No markers found in the active sequence." };
+  }
+
+  return {
+    sequenceName: sequence.name || "Sequence",
+    markers: markers,
+  };
+};
+
+type MarkerQueuePayload = {
+  secondsBefore: number;
+  secondsAfter: number;
+};
+
+// Build queue items from markers with before/after duration offsets
+export const claude_getMarkerQueueInfo = (payload: MarkerQueuePayload) => {
+  var sequence = claude_getActiveSequence();
+  if (!sequence) {
+    return { error: "No active sequence." };
+  }
+  if (!sequence.markers) {
+    return { error: "Markers not available." };
+  }
+
+  var TICKS_PER_SECOND = 254016000000;
+  var beforeTicks = Math.round((payload.secondsBefore || 0) * TICKS_PER_SECOND);
+  var afterTicks = Math.round((payload.secondsAfter || 0) * TICKS_PER_SECOND);
+
+  // Get sequence bounds
+  var seqStartTicks = 0;
+  var seqEndTicks = 0;
+  try {
+    if (sequence.end && sequence.end.ticks) {
+      seqEndTicks = Number(sequence.end.ticks);
+    }
+  } catch (e) {}
+
+  var items: any[] = [];
+
+  // Use getFirstMarker/getNextMarker iterator pattern (bracket indexing is unreliable)
+  var marker: any = null;
+  try { marker = sequence.markers.getFirstMarker(); } catch (e) {}
+
+  if (!marker) {
+    return { error: "No markers found in the active sequence." };
+  }
+
+  var i = 0;
+  while (marker) {
+    var markerTicks = 0;
+    try {
+      if (marker.start && marker.start.ticks) {
+        markerTicks = Number(marker.start.ticks);
+      }
+    } catch (e) {}
+
+    var markerName = "";
+    try { markerName = marker.name || ""; } catch (e) {}
+    if (!markerName) markerName = "Marker " + (i + 1);
+    var colorIndex = 0;
+    try { colorIndex = marker.getColorByIndex(i); } catch (e) {}
+
+    // Clamp start/end to sequence bounds
+    var startTicks = markerTicks - beforeTicks;
+    if (startTicks < seqStartTicks) startTicks = seqStartTicks;
+    var endTicks = markerTicks + afterTicks;
+    if (seqEndTicks > 0 && endTicks > seqEndTicks) endTicks = seqEndTicks;
+
+    // Ensure valid range
+    if (endTicks > startTicks) {
+      items.push({
+        sequenceName: sequence.name || "Sequence",
+        markerName: markerName,
+        markerIndex: i,
+        markerTicks: markerTicks,
+        startTicks: startTicks,
+        endTicks: endTicks,
+        clipIndex: i,
+        colorIndex: colorIndex,
+      });
+    }
+
+    i++;
+    try { marker = sequence.markers.getNextMarker(marker); } catch (e) { marker = null; }
+  }
+
+  if (!items.length) {
+    return { error: "No valid marker regions found." };
+  }
+
+  return { items: items };
+};
+
+type FrameExportPayload = {
+  timeTicks: number;
+  outputFilePath: string;
+};
+
+// Export a single JPEG frame at a given time position
+export const claude_exportFrameJPEG = (payload: FrameExportPayload) => {
+  var sequence = app.project.activeSequence;
+  if (!sequence) {
+    return { error: "No active sequence." };
+  }
+
+  try {
+    // Move playhead to the marker position first - required for frame export
+    sequence.setPlayerPosition(String(payload.timeTicks));
+
+    // Enable QE DOM and export via QE sequence
+    app.enableQE();
+    if (qe && qe.project && qe.project.getActiveSequence) {
+      var qeSeq = qe.project.getActiveSequence();
+      if (qeSeq && qeSeq.exportFrameJPEG) {
+        var cti = qeSeq.CTI;
+        qeSeq.exportFrameJPEG(cti.timecode, payload.outputFilePath);
+
+        var fileSize = 0;
+        try {
+          var checkFile = new File(payload.outputFilePath);
+          if (checkFile.exists) {
+            checkFile.open("r");
+            fileSize = checkFile.length;
+            checkFile.close();
+          }
+        } catch (sizeErr) {}
+
+        return {
+          success: true,
+          outputPath: payload.outputFilePath,
+          fileSize: fileSize,
+        };
+      }
+    }
+
+    return { error: "exportFrameJPEG not available in this version of Premiere Pro." };
+  } catch (e: any) {
+    return { error: "Frame export failed: " + (e?.toString?.() || String(e)) };
+  }
+};
+
+type ValidatePresetPayload = {
+  presetName: string;
+  presetPath: string;
+};
+
+// Validate a preset path and attempt re-resolution if broken
+export const claude_validatePresetPath = (payload: ValidatePresetPayload) => {
+  // Check if the stored path exists
+  var file = new File(payload.presetPath);
+  if (file.exists) {
+    return { valid: true, path: payload.presetPath };
+  }
+
+  // Path is broken - try to find the preset by name
+  var resolved = claude_findPresetPath(payload.presetName);
+  if (resolved) {
+    return { valid: false, resolved: true, path: resolved };
+  }
+
+  return { valid: false, resolved: false, path: null };
 };
