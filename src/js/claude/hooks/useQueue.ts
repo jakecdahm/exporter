@@ -42,7 +42,7 @@ const formatLogFilename = (projectName: string): string => {
   const minutes = String(now.getMinutes()).padStart(2, "0");
   const ampm = hours >= 12 ? "PM" : "AM";
   const hour12 = hours % 12 || 12;
-  const time = `${hour12}:${minutes}${ampm}`;
+  const time = `${hour12}.${minutes}${ampm}`;
 
   return `${date} - ${time} - ${projectName}.csv`;
 };
@@ -762,9 +762,18 @@ export const useQueue = ({
       });
     }
 
-    // Log file was written incrementally, just notify user
-    if (logPath) {
-      addLog("info", "Log saved");
+    // Final log write and notify user
+    if (logPath && outputDir && exportResults.length > 0) {
+      try {
+        const wrote = writeExportLog(logPath, exportResults, outputDir);
+        if (wrote) {
+          addLog("info", "Log saved");
+        } else {
+          addLog("warning", "Failed to write log");
+        }
+      } catch (e: any) {
+        addLog("warning", `Log write error: ${e?.message || e}`);
+      }
     }
 
     // Collect unique output directories and open each in Finder

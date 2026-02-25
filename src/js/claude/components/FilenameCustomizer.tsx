@@ -6,6 +6,7 @@ interface FilenameCustomizerProps {
   template: string;
   onTemplateChange: (template: string) => void;
   extension?: string;
+  exportType?: "clips" | "sequences" | "markers";
   onLog?: (type: "info" | "success" | "error" | "warning", message: string) => void;
 }
 
@@ -26,6 +27,7 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
   template,
   onTemplateChange,
   extension = ".mp4",
+  exportType,
   onLog,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -133,7 +135,10 @@ const FilenameCustomizer: React.FC<FilenameCustomizerProps> = ({
       </div>
 
       <div className="filename-tokens">
-        {TOKENS.map((token) => (
+        {TOKENS.filter((token) => {
+          if (token.key === "{marker}") return exportType === "markers";
+          return true;
+        }).map((token) => (
           <button
             key={token.key}
             type="button"

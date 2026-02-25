@@ -65,6 +65,7 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({
         template={filenameTemplate}
         onTemplateChange={onFilenameTemplateChange}
         extension={exportType === "markers" && markerSubMode === "stills" ? ".jpg" : ".mp4"}
+        exportType={exportType}
         onLog={onLog}
       />
 
