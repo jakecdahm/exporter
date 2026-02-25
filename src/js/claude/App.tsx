@@ -61,6 +61,7 @@ export interface QueueItem {
   status: "pending" | "exporting" | "completed" | "failed";
   markerName?: string;
   markerTicks?: number;
+  colorIndex?: number;
   isStillExport?: boolean;
 }
 

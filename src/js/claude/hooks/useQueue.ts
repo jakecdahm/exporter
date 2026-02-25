@@ -388,6 +388,7 @@ export const useQueue = ({
                   markerIndex: i,
                   markerTicks: m.ticks,
                   clipIndex: i,
+                  colorIndex: m.colorIndex,
                 })),
               };
             } else {
@@ -411,11 +412,11 @@ export const useQueue = ({
           return false;
         }
 
-        // Filter markers by selected colors
-        if (settings.exportType === "markers" && settings.markerColorFilter) {
+        // Filter markers by selected colors (empty array = no filter)
+        if (settings.exportType === "markers" && settings.markerColorFilter && settings.markerColorFilter.length > 0 && settings.markerColorFilter.length < 8) {
           const allowedColors = settings.markerColorFilter;
           result.items = result.items.filter(
-            (item: any) => item.colorIndex === undefined || allowedColors.includes(item.colorIndex)
+            (item: any) => allowedColors.includes(item.colorIndex)
           );
           if (result.items.length === 0) {
             addLog("warning", "No markers match the selected colors");
@@ -467,6 +468,7 @@ export const useQueue = ({
             status: "pending" as const,
             markerName: item.markerName,
             markerTicks: item.markerTicks,
+            colorIndex: item.colorIndex,
             isStillExport: isStillsMode,
           };
         });

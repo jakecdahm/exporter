@@ -39,6 +39,17 @@ const statusLabels: Record<QueueItem["status"], string> = {
   failed: "Failed",
 };
 
+const MARKER_COLOR_HEX: Record<number, string> = {
+  0: "#3dcc5b",
+  1: "#e05555",
+  2: "#9b59b6",
+  3: "#e8912d",
+  4: "#e8d44d",
+  5: "#e0e0e0",
+  6: "#4a90d9",
+  7: "#47c8c8",
+};
+
 // Premiere Pro uses 254016000000 ticks per second
 const TICKS_PER_SECOND = 254016000000;
 
@@ -115,12 +126,20 @@ const QueuePanel: React.FC<QueuePanelProps> = ({
           return (
             <div key={item.id} className={`queue-item queue-item--${item.status}`}>
               <div className="queue-item-info">
-                <span className="queue-item-name" title={`${item.outputPath}/${item.expectedFilename}`}>
-                  {item.expectedFilename}
-                </span>
-                <span className="queue-item-folder" title={item.outputPath}>
-                  {folderName}
-                </span>
+                {item.colorIndex !== undefined && MARKER_COLOR_HEX[item.colorIndex] && (
+                  <span
+                    className="queue-item-color-dot"
+                    style={{ backgroundColor: MARKER_COLOR_HEX[item.colorIndex] }}
+                  />
+                )}
+                <div className="queue-item-text">
+                  <span className="queue-item-name" title={`${item.outputPath}/${item.expectedFilename}`}>
+                    {item.expectedFilename}
+                  </span>
+                  <span className="queue-item-folder" title={item.outputPath}>
+                    {folderName}
+                  </span>
+                </div>
               </div>
               <div className="queue-item-actions">
                 {statusLabels[item.status] && (
