@@ -43,12 +43,11 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({
   markerColorFilter,
   onMarkerColorFilterChange,
 }) => {
-  const activeColors = markerColorFilter ?? [0, 1, 2, 3, 4, 5, 6, 7];
+  const activeColors = markerColorFilter ?? [];
   const allSelected = activeColors.length === 8;
 
   const toggleColor = (index: number) => {
     if (activeColors.includes(index)) {
-      if (activeColors.length === 1) return; // Don't allow deselecting all
       onMarkerColorFilterChange?.(activeColors.filter((c) => c !== index));
     } else {
       onMarkerColorFilterChange?.([...activeColors, index]);
@@ -56,8 +55,11 @@ const ExportOptions: React.FC<ExportOptionsProps> = ({
   };
 
   const toggleAll = () => {
-    if (allSelected) return;
-    onMarkerColorFilterChange?.([0, 1, 2, 3, 4, 5, 6, 7]);
+    if (allSelected) {
+      onMarkerColorFilterChange?.([]);
+    } else {
+      onMarkerColorFilterChange?.([0, 1, 2, 3, 4, 5, 6, 7]);
+    }
   };
   return (
     <div className="export-options">

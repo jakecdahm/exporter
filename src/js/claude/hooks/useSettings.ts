@@ -50,7 +50,7 @@ const DEFAULT_SETTINGS: ExporterSettings = {
   markerSubMode: "video",
   markerSecondsBefore: 5,
   markerSecondsAfter: 5,
-  markerColorFilter: [0, 1, 2, 3, 4, 5, 6, 7],
+  markerColorFilter: [],
 };
 
 export const useSettings = () => {

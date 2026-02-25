@@ -561,9 +561,11 @@ export const useQueue = ({
         const exportStartTime = Date.now();
         try {
           const jpgPath = path.join(item.outputPath, item.expectedFilename);
+          // exportFrameJPEG auto-appends .jpg, so pass path without extension
+          const jpgPathNoExt = jpgPath.replace(/\.jpg$/i, "");
           const result = (await evalTS("claude_exportFrameJPEG", {
             timeTicks: item.markerTicks,
-            outputFilePath: jpgPath,
+            outputFilePath: jpgPathNoExt,
           })) as any;
           const exportDurationSeconds = (Date.now() - exportStartTime) / 1000;
 
@@ -829,9 +831,11 @@ export const useQueue = ({
         );
         try {
           const jpgPath = path.join(item.outputPath, item.expectedFilename);
+          // exportFrameJPEG auto-appends .jpg, so pass path without extension
+          const jpgPathNoExt = jpgPath.replace(/\.jpg$/i, "");
           const result = (await evalTS("claude_exportFrameJPEG", {
             timeTicks: item.markerTicks,
-            outputFilePath: jpgPath,
+            outputFilePath: jpgPathNoExt,
           })) as any;
           if (result && result.error) {
             setQueue((prev) =>

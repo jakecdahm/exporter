@@ -1641,7 +1641,7 @@ export const claude_getMarkerInfo = (payload: MarkerInfoPayload) => {
       }
     } catch (e) {}
     var colorIndex = 0;
-    try { colorIndex = marker.getColorByIndex(i); } catch (e) {}
+    try { colorIndex = marker.getColorByIndex(); } catch (e) {}
 
     markers.push({
       name: name || ("Marker " + (i + 1)),
@@ -1716,7 +1716,7 @@ export const claude_getMarkerQueueInfo = (payload: MarkerQueuePayload) => {
     try { markerName = marker.name || ""; } catch (e) {}
     if (!markerName) markerName = "Marker " + (i + 1);
     var colorIndex = 0;
-    try { colorIndex = marker.getColorByIndex(i); } catch (e) {}
+    try { colorIndex = marker.getColorByIndex(); } catch (e) {}
 
     // Clamp start/end to sequence bounds
     var startTicks = markerTicks - beforeTicks;
