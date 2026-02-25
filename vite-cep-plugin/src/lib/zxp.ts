@@ -31,7 +31,7 @@ export const signZXP = async (
   const data = config.zxp;
   const output = path.join(zxpDir, `${name}.zxp`);
   const certPath = path.join(tmpDir, `${name}-cert.p12`);
-  const signPrepStr = `${zxpCmd} -selfSignedCert ${data.country} ${data.province} ${data.org} ${name} ${data.password} "${certPath}"`;
+  const signPrepStr = `${zxpCmd} -selfSignedCert ${data.country} ${data.province} "${data.org}" ${name} ${data.password} "${certPath}"`;
   const cwdDir = path.join(__dirname, "..", "bin");
 
   removeIfExists(certPath);
