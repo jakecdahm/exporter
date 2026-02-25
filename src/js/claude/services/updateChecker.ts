@@ -3,7 +3,7 @@ import { version as currentVersion } from "../../../shared/shared";
 
 const GITHUB_OWNER = "jakecdahm";
 const GITHUB_REPO = "exporter";
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const CACHE_KEY = "com.exporter.claude.lastUpdateCheck";
 
 export interface UpdateInfo {
